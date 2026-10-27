@@ -1,7 +1,7 @@
 {
 	"id": "md-task-manager",
 	"name": "Markdown Task Manager",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"minAppVersion": "1.4.0",
 	"description": "Three-pane task manager (inbox, today, upcoming, projects, tags) on top of plain Markdown tasks. Compatible with Tasks and Dataview syntax.",
 	"author": "bloodyblogge",

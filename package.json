@@ -1,6 +1,6 @@
 {
 	"name": "md-task-manager",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"description": "Todoist-style task manager on top of plain Markdown tasks (Tasks & Dataview syntax).",
 	"main": "main.js",
 	"scripts": {
