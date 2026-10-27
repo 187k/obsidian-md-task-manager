@@ -1,0 +1,1229 @@
+/* ==========================================================================
+   Markdown Task Manager — all classes are prefixed with mtm-
+   Colors come from Obsidian theme variables so light/dark themes both work.
+   ========================================================================== */
+
+.mtm-view {
+	padding: 0 !important;
+	overflow: hidden;
+	--mtm-prio-highest: var(--color-red);
+	--mtm-prio-high: var(--color-orange);
+	--mtm-prio-medium: var(--color-yellow);
+	--mtm-prio-low: var(--color-blue);
+	--mtm-prio-lowest: var(--text-faint);
+	--mtm-row-hover: var(--background-modifier-hover);
+	--mtm-row-selected: var(--background-modifier-active-hover);
+	container-type: inline-size;
+}
+
+/* Flex, not grid: a hidden pane simply drops out and the list takes the space. */
+.mtm-root {
+	display: flex;
+	height: 100%;
+	position: relative;
+	overflow: hidden;
+}
+.mtm-root > * {
+	box-sizing: border-box;
+	min-width: 0;
+}
+.mtm-sidebar {
+	flex: 0 0 240px;
+	width: 240px;
+}
+.mtm-main {
+	flex: 1 1 auto;
+}
+.mtm-details {
+	flex: 0 0 320px;
+	width: 320px;
+}
+.mtm-root.mtm-hide-sidebar .mtm-sidebar,
+.mtm-root.mtm-hide-details .mtm-details {
+	display: none;
+}
+
+@container (max-width: 960px) {
+	.mtm-sidebar {
+		flex-basis: 200px;
+		width: 200px;
+	}
+	.mtm-details {
+		flex-basis: 270px;
+		width: 270px;
+	}
+}
+
+/* Compact mode (set from code when the view is narrow): side panes slide over the list on demand. */
+.mtm-root.mtm-compact .mtm-sidebar,
+.mtm-root.mtm-compact .mtm-details {
+	display: none;
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	z-index: 5;
+	box-shadow: var(--shadow-l);
+}
+.mtm-root.mtm-compact .mtm-sidebar {
+	left: 44px;
+	width: min(260px, 85%);
+}
+.mtm-root.mtm-compact .mtm-details {
+	right: 0;
+	width: min(340px, 90%);
+}
+.mtm-root.mtm-compact.mtm-overlay-sidebar .mtm-sidebar {
+	display: flex;
+}
+.mtm-root.mtm-compact.mtm-overlay-details .mtm-details {
+	display: block;
+}
+
+/* ---- sidebar ------------------------------------------------------------ */
+
+.mtm-sidebar {
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	background: var(--background-secondary);
+	border-right: 1px solid var(--background-modifier-border);
+}
+.mtm-sidebar-scroll {
+	flex: 1;
+	overflow-y: auto;
+	padding: 10px 8px;
+}
+.mtm-sidebar-footer {
+	display: flex;
+	gap: 4px;
+	padding: 6px 8px;
+	border-top: 1px solid var(--background-modifier-border);
+}
+.mtm-nav-group {
+	margin-bottom: 12px;
+}
+.mtm-nav-item {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 4px 8px;
+	border-radius: var(--radius-s);
+	cursor: pointer;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	user-select: none;
+}
+.mtm-nav-item:hover {
+	background: var(--mtm-row-hover);
+	color: var(--text-normal);
+}
+.mtm-nav-item.is-active {
+	background: var(--background-modifier-active-hover);
+	color: var(--text-normal);
+	font-weight: var(--font-semibold);
+}
+.mtm-nav-icon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 16px;
+	flex: none;
+}
+.mtm-nav-icon svg {
+	width: 15px;
+	height: 15px;
+}
+.mtm-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	display: inline-block;
+}
+.mtm-project-item .mtm-dot {
+	border-radius: 2px;
+	transform: rotate(45deg);
+}
+.mtm-nav-label {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.mtm-nav-count {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+}
+.mtm-nav-section {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	margin: 10px 0 2px;
+	padding: 2px 4px;
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-semibold);
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
+	color: var(--text-faint);
+	cursor: pointer;
+	user-select: none;
+}
+.mtm-chevron,
+.mtm-tree-toggle {
+	display: inline-flex;
+	width: 14px;
+	flex: none;
+	transition: transform 120ms ease;
+}
+.mtm-chevron svg,
+.mtm-tree-toggle svg {
+	width: 12px;
+	height: 12px;
+}
+.is-collapsed > .mtm-chevron,
+.mtm-tree-toggle.is-collapsed {
+	transform: rotate(-90deg);
+}
+.mtm-drop-hover {
+	outline: 2px dashed var(--interactive-accent);
+	outline-offset: -2px;
+	background: var(--background-modifier-hover);
+}
+
+/* ---- main column -------------------------------------------------------- */
+
+.mtm-main {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	min-height: 0;
+}
+.mtm-header {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 10px 14px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+.mtm-header-title {
+	font-size: var(--font-ui-large);
+	font-weight: var(--font-bold);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.mtm-header-count {
+	color: var(--text-faint);
+	font-size: var(--font-ui-small);
+}
+.mtm-spacer {
+	flex: 1;
+}
+.mtm-filter {
+	width: 160px;
+	min-width: 80px;
+}
+.mtm-list {
+	flex: 1;
+	overflow-y: auto;
+	padding: 4px 8px 16px;
+	outline: none;
+}
+.mtm-empty {
+	padding: 40px 16px;
+	text-align: center;
+	color: var(--text-faint);
+}
+.mtm-empty-icon svg {
+	width: 36px;
+	height: 36px;
+	opacity: 0.5;
+	margin-bottom: 8px;
+}
+.mtm-group-header {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	margin: 14px 4px 4px;
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-semibold);
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
+	color: var(--text-muted);
+	cursor: pointer;
+	user-select: none;
+}
+.mtm-group-header.mtm-danger {
+	color: var(--text-error);
+}
+.mtm-group-count {
+	color: var(--text-faint);
+	margin-left: 4px;
+}
+
+/* ---- task rows ---------------------------------------------------------- */
+
+.mtm-row {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+	padding: 7px 8px;
+	border-radius: var(--radius-s);
+	border-bottom: 1px solid var(--background-modifier-border);
+	cursor: default;
+}
+.mtm-row:hover {
+	background: var(--mtm-row-hover);
+}
+.mtm-row.is-selected {
+	background: var(--mtm-row-selected);
+}
+.mtm-row.is-closed .mtm-row-title {
+	color: var(--text-faint);
+	text-decoration: line-through;
+}
+.mtm-row-main {
+	flex: 1;
+	min-width: 0;
+}
+.mtm-row-title-line {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	min-width: 0;
+}
+.mtm-row-title {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.mtm-row-note {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	margin-top: 1px;
+}
+.mtm-subtask-count {
+	display: inline-flex;
+	align-items: center;
+	gap: 2px;
+	flex: none;
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+}
+.mtm-subtask-count svg {
+	width: 12px;
+	height: 12px;
+}
+.mtm-row-meta {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	flex-wrap: wrap;
+	gap: 4px 10px;
+	max-width: 50%;
+	font-size: var(--font-ui-smaller);
+	padding-top: 2px;
+}
+.mtm-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+.mtm-chip svg {
+	width: 12px;
+	height: 12px;
+}
+.mtm-date.is-today {
+	color: var(--color-green);
+}
+.mtm-date.is-overdue {
+	color: var(--text-error);
+}
+.mtm-file {
+	cursor: pointer;
+	text-decoration: underline;
+	text-decoration-color: var(--background-modifier-border);
+	max-width: 160px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.mtm-file:hover {
+	color: var(--text-accent);
+}
+.mtm-tag {
+	color: var(--mtm-tag-color, var(--text-accent));
+	cursor: pointer;
+	white-space: nowrap;
+}
+.mtm-muted {
+	color: var(--text-faint);
+}
+
+/* ---- checkbox ----------------------------------------------------------- */
+
+.mtm-checkbox {
+	flex: none;
+	width: 18px;
+	height: 18px;
+	margin-top: 1px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border: 1.5px solid var(--text-faint);
+	border-radius: 4px;
+	cursor: pointer;
+	color: var(--text-on-accent);
+	transition: background 100ms ease;
+}
+.mtm-checkbox svg {
+	width: 12px;
+	height: 12px;
+	stroke-width: 3px;
+}
+.mtm-checkbox:hover {
+	background: var(--background-modifier-hover);
+}
+.mtm-checkbox.mtm-prio-highest {
+	border-color: var(--mtm-prio-highest);
+	background: color-mix(in srgb, var(--mtm-prio-highest) 12%, transparent);
+}
+.mtm-checkbox.mtm-prio-high {
+	border-color: var(--mtm-prio-high);
+	background: color-mix(in srgb, var(--mtm-prio-high) 12%, transparent);
+}
+.mtm-checkbox.mtm-prio-medium {
+	border-color: var(--mtm-prio-medium);
+	background: color-mix(in srgb, var(--mtm-prio-medium) 12%, transparent);
+}
+.mtm-checkbox.mtm-prio-low {
+	border-color: var(--mtm-prio-low);
+	background: color-mix(in srgb, var(--mtm-prio-low) 12%, transparent);
+}
+.mtm-checkbox.mtm-prio-lowest {
+	border-style: dashed;
+}
+.mtm-checkbox.mtm-status-in_progress {
+	border-radius: 50%;
+	color: var(--text-muted);
+}
+.mtm-checkbox.mtm-status-todo:has(svg) {
+	color: var(--text-muted);
+}
+.mtm-checkbox.mtm-status-done {
+	background: var(--interactive-accent);
+	border-color: var(--interactive-accent);
+}
+.mtm-checkbox.mtm-status-cancelled {
+	border-color: var(--text-faint);
+	color: var(--text-faint);
+	background: transparent;
+}
+
+/* ---- quick add ---------------------------------------------------------- */
+
+.mtm-quickadd {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 8px 14px;
+	border-top: 1px solid var(--background-modifier-border);
+	color: var(--text-accent);
+}
+.mtm-quickadd-icon svg {
+	width: 16px;
+	height: 16px;
+}
+.mtm-quickadd-input {
+	flex: 1;
+	border: none !important;
+	background: transparent !important;
+	box-shadow: none !important;
+	padding: 4px 0 !important;
+}
+.mtm-quickadd-modal-input {
+	width: 100%;
+}
+
+/* ---- details panel ------------------------------------------------------ */
+
+.mtm-details {
+	overflow-y: auto;
+	padding: 14px 16px 24px;
+	border-left: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+	min-width: 0;
+}
+.mtm-details-empty {
+	height: 100%;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	text-align: center;
+	color: var(--text-faint);
+}
+.mtm-details-empty-title {
+	font-weight: var(--font-semibold);
+	color: var(--text-muted);
+	margin-bottom: 4px;
+}
+.mtm-details-empty-hint {
+	font-size: var(--font-ui-smaller);
+}
+.mtm-details-parent {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	cursor: pointer;
+	margin-bottom: 8px;
+}
+.mtm-details-parent svg {
+	width: 12px;
+	height: 12px;
+}
+.mtm-details-top {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+	margin-bottom: 12px;
+}
+.mtm-details-top .mtm-checkbox {
+	margin-top: 6px;
+}
+.mtm-details textarea {
+	width: 100%;
+	resize: none;
+	overflow: hidden;
+	background: transparent;
+	border: 1px solid transparent;
+	border-radius: var(--radius-s);
+	padding: 4px 6px;
+	font-family: inherit;
+}
+.mtm-details textarea:hover {
+	border-color: var(--background-modifier-border);
+}
+.mtm-details textarea:focus {
+	border-color: var(--interactive-accent);
+	background: var(--background-primary);
+}
+.mtm-details-title {
+	font-size: var(--font-ui-large);
+	font-weight: var(--font-semibold);
+}
+.mtm-details-desc {
+	min-height: 60px;
+	font-size: var(--font-ui-small);
+}
+.mtm-props {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin-bottom: 12px;
+}
+.mtm-prop {
+	display: grid;
+	grid-template-columns: 110px minmax(0, 1fr);
+	align-items: center;
+	gap: 8px;
+	min-height: 28px;
+	font-size: var(--font-ui-small);
+}
+.mtm-prop-name {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	color: var(--text-muted);
+}
+.mtm-prop-name svg {
+	width: 14px;
+	height: 14px;
+}
+.mtm-prop-value {
+	min-width: 0;
+}
+.mtm-prop-value select,
+.mtm-prop-value input[type="text"],
+.mtm-prop-value input[type="date"] {
+	width: 100%;
+	font-size: var(--font-ui-small);
+}
+.mtm-date-field {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+.mtm-prio-select.mtm-prio-highest {
+	color: var(--mtm-prio-highest);
+}
+.mtm-prio-select.mtm-prio-high {
+	color: var(--mtm-prio-high);
+}
+.mtm-prio-select.mtm-prio-medium {
+	color: var(--mtm-prio-medium);
+}
+.mtm-prio-select.mtm-prio-low {
+	color: var(--mtm-prio-low);
+}
+.mtm-tags-value {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	align-items: center;
+}
+.mtm-tag-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 2px;
+	padding: 1px 4px 1px 8px;
+	border-radius: 10px;
+	font-size: var(--font-ui-smaller);
+	color: var(--mtm-tag-color);
+	background: color-mix(in srgb, var(--mtm-tag-color) 15%, transparent);
+}
+.mtm-tag-remove {
+	display: inline-flex;
+	cursor: pointer;
+	opacity: 0.6;
+}
+.mtm-tag-remove:hover {
+	opacity: 1;
+}
+.mtm-tag-remove svg,
+.mtm-tag-add svg {
+	width: 12px;
+	height: 12px;
+}
+.mtm-link {
+	color: var(--text-accent);
+	cursor: pointer;
+}
+.mtm-link:hover {
+	text-decoration: underline;
+}
+.mtm-section-title {
+	margin: 16px 0 6px;
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-semibold);
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
+	color: var(--text-muted);
+}
+.mtm-subtasks,
+.mtm-comments {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+.mtm-subtask {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 4px;
+	border-radius: var(--radius-s);
+	cursor: pointer;
+	font-size: var(--font-ui-small);
+}
+.mtm-subtask:hover {
+	background: var(--mtm-row-hover);
+}
+.mtm-subtask .mtm-checkbox {
+	width: 15px;
+	height: 15px;
+	margin-top: 0;
+}
+.mtm-subtask-title {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.mtm-inline-input {
+	width: 100%;
+	margin-top: 4px;
+	font-size: var(--font-ui-small);
+}
+.mtm-comment {
+	padding: 6px 8px;
+	border-radius: var(--radius-s);
+	background: var(--background-primary);
+	font-size: var(--font-ui-small);
+}
+.mtm-comment-time {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	margin-bottom: 2px;
+}
+.mtm-details-footer {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-top: 20px;
+}
+.mtm-details-bulk-title {
+	font-size: var(--font-ui-large);
+	font-weight: var(--font-semibold);
+	margin-bottom: 12px;
+}
+.mtm-bulk-actions {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 6px;
+}
+.mtm-bulk-btn {
+	display: flex;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 6px;
+}
+.mtm-bulk-btn svg {
+	width: 14px;
+	height: 14px;
+}
+.mtm-bulk-list {
+	margin-top: 16px;
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+}
+.mtm-bulk-item {
+	padding: 3px 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* ---- modals & settings -------------------------------------------------- */
+
+.mtm-date-input {
+	width: 100%;
+	margin-bottom: 8px;
+}
+.mtm-setting-preview {
+	color: var(--text-accent);
+}
+.mtm-setting-indent {
+	padding-left: 24px;
+}
+.mtm-status-table {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin-bottom: 8px;
+}
+.mtm-status-row {
+	display: grid;
+	grid-template-columns: 60px minmax(0, 1fr) 140px 160px 32px;
+	gap: 8px;
+	align-items: center;
+}
+.mtm-status-head {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+.mtm-status-symbol {
+	text-align: center;
+	font-family: var(--font-monospace);
+}
+.mtm-status-icon-cell {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+.mtm-status-icon-cell input {
+	min-width: 0;
+	flex: 1;
+}
+.mtm-status-icon-preview svg {
+	width: 16px;
+	height: 16px;
+}
+
+/* ==========================================================================
+   Ribbon (list / calendar switch)
+   ========================================================================== */
+
+.mtm-ribbon {
+	flex: 0 0 44px;
+	width: 44px;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 6px;
+	padding: 10px 0;
+	background: var(--background-secondary-alt, var(--background-secondary));
+	border-right: 1px solid var(--background-modifier-border);
+}
+.mtm-ribbon-btn {
+	width: 30px;
+	height: 30px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: var(--radius-m);
+}
+.mtm-ribbon-btn.is-active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+.mtm-ribbon-btn svg {
+	width: 18px;
+	height: 18px;
+}
+
+/* Mode switch: the calendar replaces both the navigation and the list. */
+.mtm-calendar {
+	display: none;
+	flex: 1 1 auto;
+	flex-direction: column;
+	min-width: 0;
+	min-height: 0;
+	outline: none;
+	--mtm-cal-gutter: 52px;
+	--mtm-cal-line: var(--background-modifier-border);
+	user-select: none;
+}
+.mtm-root.mtm-mode-calendar .mtm-calendar {
+	display: flex;
+}
+.mtm-root.mtm-mode-calendar .mtm-sidebar,
+.mtm-root.mtm-mode-calendar .mtm-main {
+	display: none !important;
+}
+
+/* ==========================================================================
+   Calendar
+   ========================================================================== */
+
+.mtm-calendar.is-dragging,
+.mtm-calendar.is-dragging * {
+	cursor: grabbing !important;
+}
+.mtm-cal-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 12px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	flex-wrap: wrap;
+}
+.mtm-cal-nav {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+.mtm-cal-title {
+	font-size: var(--font-ui-large);
+	font-weight: var(--font-bold);
+	padding: 0 6px;
+	white-space: nowrap;
+	text-transform: capitalize;
+}
+.mtm-cal-toolbar .clickable-icon.is-active {
+	color: var(--interactive-accent);
+}
+.mtm-cal-seg {
+	display: flex;
+	gap: 2px;
+	padding: 2px;
+	border-radius: var(--radius-m);
+	background: var(--background-modifier-hover);
+}
+.mtm-cal-seg button,
+.mtm-cal-btn {
+	padding: 4px 10px;
+	font-size: var(--font-ui-small);
+	box-shadow: none;
+}
+.mtm-cal-seg button {
+	background: transparent;
+}
+.mtm-cal-seg button.is-active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+.mtm-cal-body {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+}
+
+/* ---- month ---- */
+
+.mtm-cal-month {
+	flex: 1;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+}
+.mtm-cal-weekdays {
+	display: grid;
+	grid-template-columns: 28px repeat(7, minmax(0, 1fr));
+	position: sticky;
+	top: 0;
+	z-index: 2;
+	background: var(--background-primary);
+	border-bottom: 1px solid var(--mtm-cal-line);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	text-align: center;
+	padding: 6px 0;
+	text-transform: capitalize;
+}
+.mtm-cal-week {
+	display: grid;
+	grid-template-columns: 28px repeat(7, minmax(0, 1fr));
+	min-height: 120px;
+	flex: 1 0 auto;
+	border-bottom: 1px solid var(--mtm-cal-line);
+	row-gap: 2px;
+	padding-bottom: 4px;
+}
+.mtm-cal-weeknum {
+	grid-column: 1;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+}
+.mtm-cal-cell {
+	border-left: 1px solid var(--mtm-cal-line);
+	z-index: 0;
+}
+.mtm-cal-cell.is-other-month {
+	background: color-mix(in srgb, var(--background-secondary) 60%, transparent);
+}
+.mtm-cal-cell.is-today {
+	box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 60%, transparent);
+}
+.mtm-cal-cell.mtm-drop-hover {
+	outline: none;
+	background: color-mix(in srgb, var(--interactive-accent) 18%, transparent);
+}
+.mtm-cal-daynum {
+	z-index: 1;
+	justify-self: start;
+	margin: 4px 6px 2px;
+	padding: 0 5px;
+	border-radius: 10px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	cursor: pointer;
+}
+.mtm-cal-daynum:hover {
+	color: var(--text-normal);
+	text-decoration: underline;
+}
+.mtm-cal-daynum.is-today {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+.mtm-cal-daylist {
+	z-index: 1;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	padding: 0 4px;
+	min-width: 0;
+	pointer-events: none;
+}
+.mtm-cal-daylist > * {
+	pointer-events: auto;
+}
+.mtm-cal-more {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	padding: 0 6px;
+	cursor: pointer;
+}
+.mtm-cal-more:hover {
+	color: var(--text-accent);
+}
+
+/* ---- chips ---- */
+
+.mtm-cal-chip {
+	--mtm-chip-color: var(--text-faint);
+	position: relative;
+	z-index: 1;
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	min-width: 0;
+	height: 22px;
+	padding: 0 6px 0 5px;
+	margin: 0 4px;
+	border-radius: var(--radius-s);
+	border-left: 3px solid var(--mtm-chip-color);
+	background: color-mix(in srgb, var(--mtm-chip-color) 16%, var(--background-primary));
+	font-size: var(--font-ui-smaller);
+	cursor: grab;
+	overflow: hidden;
+	box-sizing: border-box;
+}
+.mtm-cal-daylist .mtm-cal-chip {
+	margin: 0;
+}
+.mtm-cal-chip:hover {
+	background: color-mix(in srgb, var(--mtm-chip-color) 26%, var(--background-primary));
+}
+.mtm-cal-chip.is-selected {
+	box-shadow: 0 0 0 2px var(--interactive-accent);
+}
+.mtm-cal-chip.is-dragging {
+	opacity: 0.35;
+}
+.mtm-cal-chip.is-closed .mtm-cal-chip-title {
+	text-decoration: line-through;
+	color: var(--text-faint);
+}
+.mtm-cal-chip.is-closed {
+	opacity: 0.75;
+}
+.mtm-cal-chip.is-overdue .mtm-cal-chip-time {
+	color: var(--text-error);
+}
+.mtm-cal-chip .mtm-checkbox {
+	width: 13px;
+	height: 13px;
+	margin: 0;
+	border-radius: 3px;
+}
+.mtm-cal-chip .mtm-checkbox svg {
+	width: 9px;
+	height: 9px;
+}
+.mtm-cal-chip-text {
+	display: flex;
+	gap: 5px;
+	min-width: 0;
+	flex: 1;
+	overflow: hidden;
+	white-space: nowrap;
+}
+.mtm-cal-chip-time {
+	flex: none;
+	color: var(--text-muted);
+	font-variant-numeric: tabular-nums;
+}
+.mtm-cal-chip-title {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	font-weight: var(--font-medium, 500);
+}
+
+/* Multi-day bar: ghost (dashed) body, the checkbox at the end on the due day. */
+.mtm-cal-chip.is-bar {
+	border: 1px dashed color-mix(in srgb, var(--mtm-chip-color) 70%, transparent);
+	border-left: 3px solid var(--mtm-chip-color);
+	background: color-mix(in srgb, var(--mtm-chip-color) 10%, transparent);
+}
+.mtm-cal-chip.is-bar.has-end-box {
+	flex-direction: row-reverse;
+}
+.mtm-cal-chip.is-bar.is-continued-left {
+	border-left-style: dashed;
+	border-top-left-radius: 0;
+	border-bottom-left-radius: 0;
+	margin-left: 0;
+}
+.mtm-cal-chip.is-bar.is-continued-right {
+	border-top-right-radius: 0;
+	border-bottom-right-radius: 0;
+	margin-right: 0;
+}
+
+/* Resize handles */
+.mtm-cal-resize {
+	position: absolute;
+	z-index: 2;
+}
+.mtm-cal-resize-right,
+.mtm-cal-resize-left {
+	top: 0;
+	bottom: 0;
+	width: 7px;
+	cursor: ew-resize;
+}
+.mtm-cal-resize-right {
+	right: 0;
+}
+.mtm-cal-resize-left {
+	left: 0;
+}
+.mtm-cal-resize-bottom {
+	left: 0;
+	right: 0;
+	bottom: 0;
+	height: 7px;
+	cursor: ns-resize;
+}
+.mtm-cal-chip:hover .mtm-cal-resize-right,
+.mtm-cal-chip:hover .mtm-cal-resize-left {
+	background: color-mix(in srgb, var(--mtm-chip-color) 50%, transparent);
+}
+.mtm-cal-chip:hover .mtm-cal-resize-bottom {
+	background: linear-gradient(transparent 2px, color-mix(in srgb, var(--mtm-chip-color) 60%, transparent) 2px 4px, transparent 4px);
+}
+
+/* ---- week / day ---- */
+
+.mtm-cal-timeview {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+}
+.mtm-cal-dayheads,
+.mtm-cal-allday,
+.mtm-cal-grid {
+	display: grid;
+}
+.mtm-cal-dayheads {
+	border-bottom: 1px solid var(--mtm-cal-line);
+}
+.mtm-cal-dayhead {
+	display: flex;
+	align-items: baseline;
+	justify-content: center;
+	gap: 6px;
+	padding: 6px 0;
+	color: var(--text-muted);
+	cursor: pointer;
+	text-transform: capitalize;
+}
+.mtm-cal-dayhead-num {
+	font-size: var(--font-ui-large);
+	color: var(--text-normal);
+}
+.mtm-cal-dayhead.is-today .mtm-cal-dayhead-num {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border-radius: 12px;
+	padding: 0 7px;
+}
+.mtm-cal-allday {
+	max-height: 35%;
+	overflow-y: auto;
+	border-bottom: 1px solid var(--mtm-cal-line);
+	row-gap: 2px;
+	padding: 3px 0;
+	min-height: 30px;
+	flex: none;
+}
+.mtm-cal-gutter-label {
+	grid-column: 1;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	text-align: right;
+	padding: 4px 6px 0 0;
+}
+.mtm-cal-scroll {
+	flex: 1;
+	min-height: 0;
+	overflow-y: scroll;
+}
+.mtm-cal-grid {
+	position: relative;
+}
+.mtm-cal-hours {
+	position: relative;
+	grid-column: 1;
+}
+.mtm-cal-hour {
+	position: absolute;
+	right: 6px;
+	transform: translateY(-50%);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	font-variant-numeric: tabular-nums;
+}
+.mtm-cal-col {
+	position: relative;
+	border-left: 1px solid var(--mtm-cal-line);
+	background-image: linear-gradient(to bottom, var(--mtm-cal-line) 1px, transparent 1px);
+}
+.mtm-cal-col.is-today {
+	background-color: color-mix(in srgb, var(--interactive-accent) 5%, transparent);
+}
+.mtm-cal-chip.is-timed {
+	position: absolute;
+	margin: 0;
+	height: auto;
+	align-items: flex-start;
+	padding-top: 2px;
+}
+.mtm-cal-chip.is-timed .mtm-cal-chip-text {
+	flex-direction: column;
+	gap: 0;
+	white-space: normal;
+}
+.mtm-cal-chip.is-timed .mtm-checkbox {
+	margin-top: 1px;
+}
+.mtm-cal-preview {
+	position: absolute;
+	left: 2px;
+	right: 2px;
+	z-index: 3;
+	border: 2px dashed var(--interactive-accent);
+	border-radius: var(--radius-s);
+	background: color-mix(in srgb, var(--interactive-accent) 15%, transparent);
+	font-size: var(--font-ui-smaller);
+	padding: 2px 4px;
+	pointer-events: none;
+}
+.mtm-cal-now {
+	position: absolute;
+	left: 0;
+	right: 0;
+	height: 2px;
+	background: var(--color-red);
+	z-index: 4;
+	pointer-events: none;
+}
+.mtm-cal-now::before {
+	content: "";
+	position: absolute;
+	left: -5px;
+	top: -4px;
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	background: var(--color-red);
+}
+
+/* List row + details: time */
+.mtm-time.is-overdue {
+	color: var(--text-error);
+}
+.mtm-time-field input[type="time"] {
+	min-width: 0;
+	flex: 1;
+}
+
+/* Month view: timed chips — edges change start / end time */
+.mtm-cal-resize-time {
+	width: 8px;
+}
+.mtm-cal-chip.has-time-handles:hover .mtm-cal-resize-time {
+	background: linear-gradient(to right, transparent 3px, var(--mtm-chip-color) 3px 5px, transparent 5px);
+}
+.mtm-cal-chip[data-time-hint] {
+	box-shadow: 0 0 0 2px var(--interactive-accent);
+	overflow: visible;
+}
+.mtm-cal-chip[data-time-hint] .mtm-cal-chip-time {
+	color: var(--interactive-accent);
+	font-weight: var(--font-bold);
+}

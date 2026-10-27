@@ -1,0 +1,197 @@
+import { Menu, setIcon } from "obsidian";
+import { t } from "../i18n";
+import { addDays, today } from "../parser/dates";
+import { countOpen, isOpen } from "../services/query";
+import { basename } from "../services/TaskIndex";
+import { NavTarget, navKey } from "../types";
+import { colorFor } from "./render";
+import { DND_TAG, TaskManagerView } from "./TaskManagerView";
+
+interface TagNode {
+	name: string;
+	full: string;
+	count: number;
+	children: Map<string, TagNode>;
+}
+
+function buildTagTree(view: TaskManagerView): TagNode {
+	const root: TagNode = { name: "", full: "", count: 0, children: new Map() };
+	for (const task of view.plugin.index.all()) {
+		const open = isOpen(task);
+		// Count each task once per tree node even if several of its tags share a prefix.
+		const counted = new Set<string>();
+		for (const tag of task.tags) {
+			let node = root;
+			const parts = tag.split("/");
+			parts.forEach((part, i) => {
+				const full = parts.slice(0, i + 1).join("/");
+				const key = part.toLowerCase();
+				let child = node.children.get(key);
+				if (!child) {
+					child = { name: part, full, count: 0, children: new Map() };
+					node.children.set(key, child);
+				}
+				if (open && !counted.has(full.toLowerCase())) {
+					child.count++;
+					counted.add(full.toLowerCase());
+				}
+				node = child;
+			});
+		}
+	}
+	return root;
+}
+
+export function renderSidebar(view: TaskManagerView, el: HTMLElement): void {
+	const { plugin } = view;
+	const { index, settings, writer } = plugin;
+	const scroll = el.querySelector(".mtm-sidebar-scroll")?.scrollTop ?? 0;
+	el.empty();
+	const nav = el.createDiv({ cls: "mtm-sidebar-scroll" });
+	const current = navKey(view.nav);
+
+	const item = (
+		parent: HTMLElement,
+		target: NavTarget,
+		label: string,
+		opts: { icon?: string; color?: string; count?: number; depth?: number } = {},
+	): HTMLElement => {
+		const row = parent.createDiv({ cls: "mtm-nav-item" });
+		row.toggleClass("is-active", navKey(target) === current);
+		if (opts.depth) row.style.paddingLeft = `${8 + opts.depth * 14}px`;
+		const icon = row.createSpan({ cls: "mtm-nav-icon" });
+		if (opts.color) icon.createSpan({ cls: "mtm-dot" }).style.background = opts.color;
+		else if (opts.icon) setIcon(icon, opts.icon);
+		row.createSpan({ cls: "mtm-nav-label", text: label });
+		if (opts.count) row.createSpan({ cls: "mtm-nav-count", text: String(opts.count) });
+		row.addEventListener("click", () => view.setNav(target));
+		return row;
+	};
+
+	const section = (key: string, label: string, build: (body: HTMLElement) => void) => {
+		const id = `section:${key}`;
+		const collapsed = view.collapsed.has(id);
+		const head = nav.createDiv({ cls: "mtm-nav-section" });
+		head.toggleClass("is-collapsed", collapsed);
+		setIcon(head.createSpan({ cls: "mtm-chevron" }), "chevron-down");
+		head.createSpan({ text: label });
+		head.addEventListener("click", () => {
+			if (collapsed) view.collapsed.delete(id);
+			else view.collapsed.add(id);
+			renderSidebar(view, el);
+		});
+		if (!collapsed) build(nav.createDiv({ cls: "mtm-nav-section-body" }));
+	};
+
+	const tagItem = (parent: HTMLElement, tag: string, label: string, count: number, depth = 0, color = colorFor(tag)) => {
+		const row = item(parent, { kind: "tag", tag }, label, { color, count, depth });
+		// Drag a tag onto a task to add it (as in the video); drop tasks on a tag to tag them.
+		row.setAttr("draggable", "true");
+		row.addEventListener("dragstart", (e) => e.dataTransfer?.setData(DND_TAG, tag));
+		view.makeDropTarget(row, (tasks) => writer.addTag(tasks, tag));
+		row.addEventListener("contextmenu", (e) => {
+			e.preventDefault();
+			const pinned = settings.pinnedTags.some((p) => p.toLowerCase() === tag.toLowerCase());
+			new Menu()
+				.addItem((i) =>
+					i
+						.setTitle(pinned ? t("unpinTag") : t("pinTag"))
+						.setIcon(pinned ? "pin-off" : "pin")
+						.onClick(async () => {
+							settings.pinnedTags = pinned
+								? settings.pinnedTags.filter((p) => p.toLowerCase() !== tag.toLowerCase())
+								: [...settings.pinnedTags, tag];
+							await plugin.saveSettings();
+							view.renderAll();
+						}),
+				)
+				.showAtMouseEvent(e);
+		});
+		return row;
+	};
+
+	if (!index.ready) {
+		nav.createDiv({ cls: "mtm-empty", text: t("indexing") });
+		return;
+	}
+
+	// ---- smart lists ----
+	const smart = nav.createDiv({ cls: "mtm-nav-group" });
+	const inbox = item(smart, { kind: "inbox" }, t("inbox"), { icon: "inbox", count: countOpen({ kind: "inbox" }, index, settings) });
+	view.makeDropTarget(inbox, (tasks) => writer.move(tasks, settings.inboxPath));
+	const todayEl = item(smart, { kind: "today" }, t("today"), { icon: "calendar", count: countOpen({ kind: "today" }, index, settings) });
+	view.makeDropTarget(todayEl, (tasks) => writer.setDate(tasks, "due", today()));
+	const upcoming = item(smart, { kind: "upcoming" }, t("upcoming"), {
+		icon: "calendar-range",
+		count: countOpen({ kind: "upcoming" }, index, settings),
+	});
+	view.makeDropTarget(upcoming, (tasks) => writer.setDate(tasks, "due", addDays(today(), 1)));
+	item(smart, { kind: "all" }, t("all"), { icon: "list", count: countOpen({ kind: "all" }, index, settings) });
+
+	// ---- pinned tags ----
+	if (settings.pinnedTags.length) {
+		section("pinned", t("pinned"), (body) => {
+			for (const tag of settings.pinnedTags) {
+				tagItem(body, tag, `#${tag}`, countOpen({ kind: "tag", tag }, index, settings));
+			}
+		});
+	}
+
+	// ---- projects ----
+	const projects = index.projects();
+	if (projects.length) {
+		section("projects", t("projects"), (body) => {
+			for (const path of projects) {
+				const row = item(body, { kind: "project", path }, basename(path), {
+					color: colorFor(path),
+					count: countOpen({ kind: "project", path }, index, settings),
+				});
+				row.addClass("mtm-project-item");
+				view.makeDropTarget(row, (tasks) => writer.move(tasks, path));
+			}
+		});
+	}
+
+	// ---- tag tree ----
+	const tree = buildTagTree(view);
+	if (tree.children.size) {
+		section("tags", t("tags"), (body) => {
+			const renderNode = (node: TagNode, depth: number) => {
+				const id = `tag:${node.full.toLowerCase()}`;
+				const hasChildren = node.children.size > 0;
+				const collapsed = !view.collapsed.has(`open:${id}`);
+				const row = tagItem(body, node.full, node.name, node.count, depth);
+				if (hasChildren) {
+					const chev = row.createSpan({ cls: "mtm-tree-toggle" });
+					row.prepend(chev);
+					chev.toggleClass("is-collapsed", collapsed);
+					setIcon(chev, "chevron-down");
+					chev.addEventListener("click", (e) => {
+						e.stopPropagation();
+						if (collapsed) view.collapsed.add(`open:${id}`);
+						else view.collapsed.delete(`open:${id}`);
+						renderSidebar(view, el);
+					});
+				} else {
+					row.prepend(createSpan({ cls: "mtm-tree-toggle" }));
+				}
+				if (hasChildren && !collapsed) {
+					for (const child of sortedChildren(node)) renderNode(child, depth + 1);
+				}
+			};
+			for (const child of sortedChildren(tree)) renderNode(child, 0);
+		});
+	}
+
+	// ---- footer ----
+	const footer = el.createDiv({ cls: "mtm-sidebar-footer" });
+	const refresh = footer.createDiv({ cls: "clickable-icon", attr: { "aria-label": t("rebuildIndex") } });
+	setIcon(refresh, "refresh-cw");
+	refresh.addEventListener("click", () => void plugin.rebuildIndex(true));
+
+	nav.scrollTop = scroll;
+}
+
+function sortedChildren(node: TagNode): TagNode[] {
+	return [...node.children.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+}
