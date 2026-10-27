@@ -20,6 +20,8 @@ export const DEFAULT_SETTINGS: TaskManagerSettings = {
 	untaggedIsInbox: false,
 	projectFolders: [],
 	projectTag: "project",
+	manualProjects: [],
+	hiddenProjects: [],
 	excludeFolders: [".trash"],
 	globalFilter: "",
 	metadataFormat: "tasks",
@@ -120,6 +122,13 @@ export class TaskManagerSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings(true);
 					}),
 			);
+
+		this.renderPathList(t("s_manualProjects"), t("s_manualProjectsDesc"), s.manualProjects, t("remove"), (p) =>
+			this.plugin.removeProject(p),
+		);
+		this.renderPathList(t("s_hiddenProjects"), t("s_hiddenProjectsDesc"), s.hiddenProjects, t("restore"), (p) =>
+			this.plugin.unhideProject(p),
+		);
 
 		this.listSetting(t("s_exclude"), t("s_excludeDesc"), "Templates, Archive", s.excludeFolders, (v) => (s.excludeFolders = v), true);
 
@@ -235,6 +244,24 @@ export class TaskManagerSettingTab extends PluginSettingTab {
 		// ---- Statuses ----
 		new Setting(containerEl).setName(t("s_statuses")).setHeading().setDesc(t("s_statusesDesc"));
 		this.renderStatuses(containerEl);
+	}
+
+	/** A read-only list of note paths with one action button per row. */
+	private renderPathList(name: string, desc: string, paths: string[], actionLabel: string, action: (path: string) => Promise<void>): void {
+		new Setting(this.containerEl).setName(name).setDesc(desc);
+		const list = this.containerEl.createDiv({ cls: "mtm-path-list" });
+		if (!paths.length) list.createDiv({ cls: "mtm-path-empty", text: t("s_listEmpty") });
+		for (const path of [...paths]) {
+			new Setting(list)
+				.setClass("mtm-setting-indent")
+				.setName(path.replace(/\.md$/, ""))
+				.addButton((b) =>
+					b.setButtonText(actionLabel).onClick(async () => {
+						await action(path);
+						this.display();
+					}),
+				);
+		}
 	}
 
 	private listSetting(

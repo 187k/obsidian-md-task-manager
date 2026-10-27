@@ -119,6 +119,43 @@ export class FileSuggestModal extends FuzzySuggestModal<string> {
 	}
 }
 
+/** Picks an existing note to use as a project, or offers to create a new note from the typed name. */
+export class ProjectNoteSuggestModal extends FuzzySuggestModal<string> {
+	constructor(
+		app: App,
+		private paths: string[],
+		private newNoteFolder: string,
+		private onPick: (path: string, create: boolean) => void,
+	) {
+		super(app);
+		this.setPlaceholder(t("addProjectPlaceholder"));
+	}
+
+	private newPath(): string | null {
+		const name = this.inputEl.value.trim().replace(/[\\/:*?"<>|#^[\]]/g, "").replace(/\.md$/i, "");
+		if (!name) return null;
+		const folder = this.newNoteFolder.replace(/\/$/, "");
+		return `${folder ? folder + "/" : ""}${name}.md`;
+	}
+
+	getItems(): string[] {
+		const p = this.newPath();
+		return p && !this.paths.includes(p) ? [NEW_NOTE + p, ...this.paths] : this.paths;
+	}
+
+	getItemText(item: string): string {
+		if (item.startsWith(NEW_NOTE)) return t("createProjectNote", { path: item.slice(NEW_NOTE.length) });
+		return `${basename(item)}  ·  ${item}`;
+	}
+
+	onChooseItem(item: string): void {
+		if (item.startsWith(NEW_NOTE)) this.onPick(item.slice(NEW_NOTE.length), true);
+		else this.onPick(item, false);
+	}
+}
+
+const NEW_NOTE = "\u0000new:";
+
 /** Command-palette quick add: a single input that understands the same shortcuts as the in-view bar. */
 export class QuickAddModal extends Modal {
 	constructor(

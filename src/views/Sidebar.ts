@@ -4,6 +4,7 @@ import { addDays, today } from "../parser/dates";
 import { countOpen, isOpen } from "../services/query";
 import { basename } from "../services/TaskIndex";
 import { NavTarget, navKey } from "../types";
+import { ProjectNoteSuggestModal } from "./modals";
 import { colorFor } from "./render";
 import { DND_TAG, TaskManagerView } from "./TaskManagerView";
 
@@ -68,13 +69,26 @@ export function renderSidebar(view: TaskManagerView, el: HTMLElement): void {
 		return row;
 	};
 
-	const section = (key: string, label: string, build: (body: HTMLElement) => void) => {
+	const section = (
+		key: string,
+		label: string,
+		build: (body: HTMLElement) => void,
+		action?: { icon: string; label: string; onClick: () => void },
+	) => {
 		const id = `section:${key}`;
 		const collapsed = view.collapsed.has(id);
 		const head = nav.createDiv({ cls: "mtm-nav-section" });
 		head.toggleClass("is-collapsed", collapsed);
 		setIcon(head.createSpan({ cls: "mtm-chevron" }), "chevron-down");
-		head.createSpan({ text: label });
+		head.createSpan({ cls: "mtm-nav-section-label", text: label });
+		if (action) {
+			const btn = head.createSpan({ cls: "clickable-icon mtm-nav-section-action", attr: { "aria-label": action.label } });
+			setIcon(btn, action.icon);
+			btn.addEventListener("click", (e) => {
+				e.stopPropagation();
+				action.onClick();
+			});
+		}
 		head.addEventListener("click", () => {
 			if (collapsed) view.collapsed.delete(id);
 			else view.collapsed.add(id);
@@ -138,19 +152,46 @@ export function renderSidebar(view: TaskManagerView, el: HTMLElement): void {
 	}
 
 	// ---- projects ----
+	// Always shown, so the "+" button is reachable even before the first project exists.
 	const projects = index.projects();
-	if (projects.length) {
-		section("projects", t("projects"), (body) => {
+	section(
+		"projects",
+		t("projects"),
+		(body) => {
+			if (!projects.length) body.createDiv({ cls: "mtm-nav-hint", text: t("noProjectsHint") });
 			for (const path of projects) {
 				const row = item(body, { kind: "project", path }, basename(path), {
 					color: colorFor(path),
 					count: countOpen({ kind: "project", path }, index, settings),
 				});
 				row.addClass("mtm-project-item");
+				row.setAttr("aria-label", path);
 				view.makeDropTarget(row, (tasks) => writer.move(tasks, path));
+				row.addEventListener("contextmenu", (e) => {
+					e.preventDefault();
+					new Menu()
+						.addItem((i) =>
+							i
+								.setTitle(t("openNote"))
+								.setIcon("file-text")
+								.onClick(() => void view.app.workspace.openLinkText(path, "", "tab")),
+						)
+						.addSeparator()
+						.addItem((i) =>
+							i
+								.setTitle(t("removeProject"))
+								.setIcon("folder-minus")
+								.onClick(async () => {
+									if (view.nav.kind === "project" && view.nav.path === path) view.setNav({ kind: "today" });
+									await plugin.removeProject(path);
+								}),
+						)
+						.showAtMouseEvent(e);
+				});
 			}
-		});
-	}
+		},
+		{ icon: "plus", label: t("addProject"), onClick: () => pickProjectNote(view) },
+	);
 
 	// ---- tag tree ----
 	const tree = buildTagTree(view);
@@ -190,6 +231,27 @@ export function renderSidebar(view: TaskManagerView, el: HTMLElement): void {
 	refresh.addEventListener("click", () => void plugin.rebuildIndex(true));
 
 	nav.scrollTop = scroll;
+}
+
+/** "+" on the Projects header: choose a note (or create one) and make it a project. */
+function pickProjectNote(view: TaskManagerView): void {
+	const { plugin, app } = view;
+	const current = new Set(plugin.index.projects());
+	const notes = app.vault
+		.getMarkdownFiles()
+		.filter((f) => !current.has(f.path))
+		.sort((a, b) => b.stat.mtime - a.stat.mtime)
+		.map((f) => f.path);
+	const folder = plugin.settings.projectFolders[0] ?? "";
+	new ProjectNoteSuggestModal(app, notes, folder, async (path, create) => {
+		if (create) {
+			const dir = path.split("/").slice(0, -1).join("/");
+			if (dir && !app.vault.getAbstractFileByPath(dir)) await app.vault.createFolder(dir);
+			if (!app.vault.getAbstractFileByPath(path)) await app.vault.create(path, "");
+		}
+		await plugin.addProject(path);
+		view.setNav({ kind: "project", path });
+	}).open();
 }
 
 function sortedChildren(node: TagNode): TagNode[] {

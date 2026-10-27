@@ -1227,3 +1227,31 @@
 	color: var(--interactive-accent);
 	font-weight: var(--font-bold);
 }
+
+/* Projects section: "+" on the header, hint when empty, path lists in settings */
+.mtm-nav-section-label {
+	flex: 1;
+}
+.mtm-nav-section-action {
+	padding: 2px;
+	opacity: 0;
+	transition: opacity 100ms ease;
+}
+.mtm-nav-section:hover .mtm-nav-section-action,
+.mtm-nav-section-action:focus-visible {
+	opacity: 1;
+}
+.mtm-nav-section-action svg {
+	width: 14px;
+	height: 14px;
+}
+.mtm-nav-hint {
+	padding: 4px 8px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+}
+.mtm-path-empty {
+	padding: 0 0 12px 24px;
+	color: var(--text-faint);
+	font-size: var(--font-ui-small);
+}

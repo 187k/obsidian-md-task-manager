@@ -96,6 +96,10 @@ export interface TaskManagerSettings {
 	projectFolders: string[];
 	/** A note whose frontmatter tags/type contain this value is a project. */
 	projectTag: string;
+	/** Notes added as projects by hand (paths), regardless of folder or tag. */
+	manualProjects: string[];
+	/** Notes removed from projects by hand (paths), even if a folder or tag rule matches. */
+	hiddenProjects: string[];
 	excludeFolders: string[];
 	/** If set, only checkbox lines containing this string are tasks (like the Tasks plugin's global filter). */
 	globalFilter: string;

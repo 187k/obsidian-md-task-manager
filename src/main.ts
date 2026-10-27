@@ -1,4 +1,4 @@
-import { Notice, Plugin, WorkspaceLeaf } from "obsidian";
+import { Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
 import { setLanguage, t } from "./i18n";
 import { parseQuickAdd } from "./parser/quickAdd";
 import { buildParserConfig } from "./parser/TaskParser";
@@ -46,6 +46,10 @@ export default class TaskManagerPlugin extends Plugin {
 			callback: () => void this.rebuildIndex(true),
 		});
 
+		// Keep the manual project lists pointing at the right notes when they are renamed or deleted.
+		this.registerEvent(this.app.vault.on("rename", (f, oldPath) => void this.onNotePathChanged(oldPath, f.path)));
+		this.registerEvent(this.app.vault.on("delete", (f) => void this.onNotePathChanged(f.path, null)));
+
 		// Index after the vault is loaded, so the initial "create" events for every file are not processed one by one.
 		this.app.workspace.onLayoutReady(async () => {
 			this.index.attach((ref) => this.registerEvent(ref));
@@ -69,6 +73,8 @@ export default class TaskManagerPlugin extends Plugin {
 			pinnedTags: [...(data.pinnedTags ?? DEFAULT_SETTINGS.pinnedTags)],
 			projectFolders: [...(data.projectFolders ?? DEFAULT_SETTINGS.projectFolders)],
 			excludeFolders: [...(data.excludeFolders ?? DEFAULT_SETTINGS.excludeFolders)],
+			manualProjects: [...(data.manualProjects ?? [])],
+			hiddenProjects: [...(data.hiddenProjects ?? [])],
 			navPrefs: { ...(data.navPrefs ?? {}) },
 		};
 	}
@@ -92,6 +98,52 @@ export default class TaskManagerPlugin extends Plugin {
 			this.reindexTimer = null;
 			void this.rebuildIndex(false);
 		}, 500);
+	}
+
+	/** Makes a note a project by hand (and un-hides it if it was hidden). */
+	async addProject(path: string): Promise<void> {
+		const s = this.settings;
+		s.hiddenProjects = s.hiddenProjects.filter((p) => p !== path);
+		if (!s.manualProjects.includes(path)) s.manualProjects.push(path);
+		await this.saveData(s);
+		await this.index.refreshFile(path);
+		this.refreshViews();
+	}
+
+	/**
+	 * Removes a note from projects. A note added by hand is simply dropped from that list;
+	 * a note that a folder/tag rule would still pick up is put on the hidden list.
+	 */
+	async removeProject(path: string): Promise<void> {
+		const s = this.settings;
+		s.manualProjects = s.manualProjects.filter((p) => p !== path);
+		const file = this.app.vault.getAbstractFileByPath(path);
+		if (file instanceof TFile && this.index.matchesProjectRules(file) && !s.hiddenProjects.includes(path)) {
+			s.hiddenProjects.push(path);
+		}
+		await this.saveData(s);
+		await this.index.refreshFile(path);
+		this.refreshViews();
+	}
+
+	/** Un-hides a note so the folder/tag rules apply to it again. */
+	async unhideProject(path: string): Promise<void> {
+		this.settings.hiddenProjects = this.settings.hiddenProjects.filter((p) => p !== path);
+		await this.saveData(this.settings);
+		await this.index.refreshFile(path);
+		this.refreshViews();
+	}
+
+	private async onNotePathChanged(oldPath: string, newPath: string | null): Promise<void> {
+		let changed = false;
+		for (const list of [this.settings.manualProjects, this.settings.hiddenProjects]) {
+			const i = list.indexOf(oldPath);
+			if (i < 0) continue;
+			if (newPath) list[i] = newPath;
+			else list.splice(i, 1);
+			changed = true;
+		}
+		if (changed) await this.saveData(this.settings);
 	}
 
 	async rebuildIndex(notify: boolean): Promise<void> {

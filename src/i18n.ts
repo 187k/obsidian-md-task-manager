@@ -161,6 +161,20 @@ const en = {
 	s_defaultDurationDesc: "How long a task with only a start time (10:00) is drawn in the week and day views.",
 	monday: "Monday",
 	sunday: "Sunday",
+	// projects (manual)
+	addProject: "Add project note",
+	addProjectPlaceholder: "Find a note or type a name for a new one…",
+	createProjectNote: "＋ Create new note: {path}",
+	removeProject: "Remove from projects",
+	openNote: "Open note",
+	noProjectsHint: "No projects yet — press + to add a note",
+	s_manualProjects: "Projects added by hand",
+	s_manualProjectsDesc: "Notes made projects with + in the sidebar. Remove one here or with right-click → Remove from projects.",
+	s_hiddenProjects: "Hidden projects",
+	s_hiddenProjectsDesc: "Notes removed from projects although a project folder or tag matches them. Restore to show them again.",
+	s_listEmpty: "None",
+	restore: "Restore",
+	remove: "Remove",
 };
 
 export type I18nKey = keyof typeof en;
@@ -326,6 +340,19 @@ const ru: Record<I18nKey, string> = {
 	s_defaultDurationDesc: "Сколько занимает в неделе и дне задача, у которой указано только время начала (10:00).",
 	monday: "Понедельник",
 	sunday: "Воскресенье",
+	addProject: "Добавить заметку-проект",
+	addProjectPlaceholder: "Найдите заметку или введите имя новой…",
+	createProjectNote: "＋ Создать новую заметку: {path}",
+	removeProject: "Убрать из проектов",
+	openNote: "Открыть заметку",
+	noProjectsHint: "Проектов пока нет — нажмите +, чтобы добавить заметку",
+	s_manualProjects: "Проекты, добавленные вручную",
+	s_manualProjectsDesc: "Заметки, добавленные кнопкой + в боковой панели. Убрать можно здесь или правым кликом → «Убрать из проектов».",
+	s_hiddenProjects: "Скрытые проекты",
+	s_hiddenProjectsDesc: "Заметки, убранные из проектов, хотя под них подходит папка или тег проекта. «Вернуть» снова покажет их.",
+	s_listEmpty: "Нет",
+	restore: "Вернуть",
+	remove: "Убрать",
 };
 
 let current: Record<I18nKey, string> = en;

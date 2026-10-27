@@ -122,7 +122,16 @@ export class TaskIndex extends Events {
 		return this.getSettings().excludeFolders.some((f) => f && (path === f || path.startsWith(f.replace(/\/$/, "") + "/")));
 	}
 
+	/** Manual choices win over the automatic rules: hidden notes are never projects, added ones always are. */
 	private isProjectFile(file: TFile): boolean {
+		const s = this.getSettings();
+		if (s.hiddenProjects.includes(file.path)) return false;
+		if (s.manualProjects.includes(file.path)) return true;
+		return this.matchesProjectRules(file);
+	}
+
+	/** Automatic rules only: a note in a project folder, or tagged/typed with the project tag. */
+	matchesProjectRules(file: TFile): boolean {
 		const s = this.getSettings();
 		if (file.path === s.inboxPath) return false;
 		if (s.projectFolders.some((f) => f && file.path.startsWith(f.replace(/\/$/, "") + "/"))) return true;
@@ -151,9 +160,15 @@ export class TaskIndex extends Events {
 		return this.byFile.get(path) ?? [];
 	}
 
-	/** Project notes that currently contain at least one task, sorted by name. */
+	/**
+	 * Projects shown in the sidebar, sorted by name: notes added by hand always
+	 * (so a fresh note without tasks can be filled from the task manager), automatic ones only while they contain tasks.
+	 */
 	projects(): string[] {
-		return [...this.projectFiles].filter((p) => this.byFile.has(p)).sort((a, b) => basename(a).localeCompare(basename(b)));
+		const manual = new Set(this.getSettings().manualProjects);
+		return [...this.projectFiles]
+			.filter((p) => manual.has(p) || this.byFile.has(p))
+			.sort((a, b) => basename(a).localeCompare(basename(b)));
 	}
 
 	allProjects(): string[] {
