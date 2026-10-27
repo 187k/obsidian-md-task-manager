@@ -115,7 +115,7 @@
 
 ### Способ 1: из релиза (без сборки)
 
-1. Откройте страницу [Releases](https://github.com/GITHUB_USER/obsidian-md-task-manager/releases) и скачайте из последнего релиза три файла: `main.js`, `manifest.json`, `styles.css`.
+1. Откройте страницу [Releases](https://github.com/187k/obsidian-md-task-manager/releases) и скачайте из последнего релиза три файла: `main.js`, `manifest.json`, `styles.css`.
 2. В хранилище создайте папку `<хранилище>/.obsidian/plugins/md-task-manager/` и положите туда эти файлы. Папка `.obsidian` скрытая: в Windows включите «Показывать скрытые элементы».
 3. В Obsidian откройте **Настройки → Сторонние плагины**, выключите безопасный режим (если включён) и нажмите **Обновить** (↻).
 4. Включите **Markdown Task Manager**.
@@ -125,7 +125,7 @@
 
 1. Установите плагин [BRAT](https://github.com/TfTHacker/obsidian42-brat) из каталога сторонних плагинов.
 2. Репозиторий приватный, поэтому сначала создайте на GitHub [персональный токен](https://github.com/settings/tokens) с доступом на чтение этого репозитория и вставьте его в настройках BRAT (**Personal access token**).
-3. Выполните команду **BRAT: Add a beta plugin for testing** и укажите `GITHUB_USER/obsidian-md-task-manager`.
+3. Выполните команду **BRAT: Add a beta plugin for testing** и укажите `187k/obsidian-md-task-manager`.
 4. Включите **Markdown Task Manager** в списке сторонних плагинов.
 
 ### Способ 3: сборка из исходников
@@ -134,7 +134,7 @@
 
 ```bash
 cd "<хранилище>/.obsidian/plugins"
-git clone https://github.com/GITHUB_USER/obsidian-md-task-manager.git md-task-manager
+git clone https://github.com/187k/obsidian-md-task-manager.git md-task-manager
 cd md-task-manager
 npm install
 npm run build
