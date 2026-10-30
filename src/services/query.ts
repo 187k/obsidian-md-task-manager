@@ -1,7 +1,7 @@
 import { moment } from "obsidian";
 import { t } from "../i18n";
-import { daysFromToday, ISO, today } from "../parser/dates";
-import { GroupBy, NavTarget, Priority, PRIORITIES_DESC, SortBy, Task, TaskManagerSettings } from "../types";
+import { addDays, daysFromToday, ISO, today } from "../parser/dates";
+import { GroupBy, HomeQuery, NavTarget, Priority, PRIORITIES_DESC, SortBy, Task, TaskManagerSettings } from "../types";
 import { basename, TaskIndex } from "./TaskIndex";
 
 export interface TaskGroup {
@@ -32,7 +32,31 @@ function tagMatches(task: Task, tag: string): boolean {
 export function isInbox(task: Task, settings: TaskManagerSettings, index: TaskIndex): boolean {
 	if (task.tags.length) return false;
 	if (task.path === settings.inboxPath) return true;
-	return settings.untaggedIsInbox && !effectiveDate(task) && !index.isProject(task.path);
+	return settings.untaggedIsInbox && !effectiveDate(task) && !index.projectOf(task.path);
+}
+
+/** Whether a task belongs on the configurable "Home" list. */
+function matchesHome(task: Task, home: HomeQuery, settings: TaskManagerSettings, index: TaskIndex, now: string): boolean {
+	if (task.priority < home.minPriority) return false;
+	if (home.tags.length && !home.tags.some((tag) => tagMatches(task, tag))) return false;
+	if (home.projects.length) {
+		const project = index.projectOf(task.path);
+		const inProject = !!project && home.projects.includes(project);
+		if (!inProject && !(home.includeInbox && isInbox(task, settings, index))) return false;
+	}
+	const d = effectiveDate(task);
+	switch (home.dateScope) {
+		case "any":
+			return true;
+		case "dated":
+			return !!d;
+		case "undated":
+			return !d;
+		default:
+			// Like "Today": closed tasks only on the day they were closed.
+			if (!isOpen(task)) return task.dates.done === now || task.dates.cancelled === now;
+			return !!d && d <= (home.dateScope === "today" ? now : addDays(now, 7));
+	}
 }
 
 /** Tasks belonging to a sidebar entry, before text filtering. */
@@ -41,6 +65,8 @@ export function tasksForNav(nav: NavTarget, index: TaskIndex, settings: TaskMana
 	const visible = (task: Task) => isOpen(task) || showCompleted;
 	return index.all().filter((task) => {
 		switch (nav.kind) {
+			case "home":
+				return visible(task) && matchesHome(task, settings.home, settings, index, now);
 			case "inbox":
 				return visible(task) && isInbox(task, settings, index);
 			case "today": {
@@ -57,7 +83,47 @@ export function tasksForNav(nav: NavTarget, index: TaskIndex, settings: TaskMana
 			case "tag":
 				return visible(task) && tagMatches(task, nav.tag);
 			case "project":
-				return visible(task) && task.path === nav.path;
+				return visible(task) && (task.path === nav.path || index.notesOf(nav.path).includes(task.path));
+		}
+	});
+}
+
+/** Extra filters from the filter bar. */
+export interface QuickFilters {
+	/** Empty = any priority. */
+	priorities: Set<Priority>;
+	date: "any" | "overdue" | "today" | "week" | "nodate";
+	/** "" = any tag. */
+	tag: string;
+}
+
+export function emptyQuickFilters(): QuickFilters {
+	return { priorities: new Set(), date: "any", tag: "" };
+}
+
+export function hasQuickFilters(f: QuickFilters): boolean {
+	return f.priorities.size > 0 || f.date !== "any" || !!f.tag;
+}
+
+export function applyQuickFilters(tasks: Task[], f: QuickFilters): Task[] {
+	if (!hasQuickFilters(f)) return tasks;
+	const now = today();
+	const week = addDays(now, 7);
+	return tasks.filter((task) => {
+		if (f.priorities.size && !f.priorities.has(task.priority)) return false;
+		if (f.tag && !tagMatches(task, f.tag)) return false;
+		const d = effectiveDate(task);
+		switch (f.date) {
+			case "overdue":
+				return !!d && d < now && isOpen(task);
+			case "today":
+				return !!d && d <= now;
+			case "week":
+				return !!d && d <= week;
+			case "nodate":
+				return !d;
+			default:
+				return true;
 		}
 	});
 }
@@ -189,7 +255,8 @@ export function groupTasks(
 			break;
 		case "project":
 			for (const task of tasks) {
-				if (index.isProject(task.path)) add(task.path, basename(task.path), task);
+				const project = index.projectOf(task.path);
+				if (project) add(project, basename(project), task);
 				else add("~none", t("noProject"), task);
 			}
 			order.sort((a, b) => (a === "~none" ? 1 : b === "~none" ? -1 : basename(a).localeCompare(basename(b))));

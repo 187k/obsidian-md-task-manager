@@ -175,7 +175,7 @@ function renderSingle(view: TaskManagerView, el: HTMLElement, task: Task): void 
 		if (d) prop(props, field === "created" ? "plus-circle" : field === "done" ? "check-circle" : "x-circle", t(field)).setText(d);
 	}
 
-	const loc = prop(props, index.isProject(task.path) ? "folder" : "file-text", t("file"));
+	const loc = prop(props, index.projectOf(task.path) ? "folder" : "file-text", t("file"));
 	const link = loc.createSpan({ cls: "mtm-link", text: basename(task.path) });
 	link.setAttr("aria-label", task.path);
 	link.addEventListener("click", () => void view.openTask(task));

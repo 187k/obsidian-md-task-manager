@@ -5,18 +5,26 @@ import { parseQuickAdd } from "../parser/quickAdd";
 import { buildParserConfig } from "../parser/TaskParser";
 import {
 	applyFilter,
+	applyQuickFilters,
+	emptyQuickFilters,
 	groupTasks,
+	hasQuickFilters,
 	hideNestedSubtasks,
+	priorityLabel,
+	QuickFilters,
 	sortTasks,
 	tasksForNav,
 } from "../services/query";
 import { basename } from "../services/TaskIndex";
 import type TaskManagerPlugin from "../main";
-import { GroupBy, NavPrefs, NavTarget, navKey, SortBy, Task, ViewMode } from "../types";
+import { DEFAULT_SETTINGS } from "../settings";
+import { GroupBy, NavPrefs, NavTarget, navKey, Priority, PRIORITIES_DESC, SCALE_STEP, SortBy, Task, ViewMode } from "../types";
 import { CalendarPane } from "./CalendarPane";
 import { renderDetails } from "./DetailsPanel";
 import { confirmDelete, showTaskMenu } from "./menus";
-import { renderSidebar } from "./Sidebar";
+import { HomeSettingsModal } from "./modals";
+import { colorFor, renderProjectMarker } from "./render";
+import { editProjectStyle, pickAttachedNote, renderSidebar } from "./Sidebar";
 import { renderTaskRow } from "./TaskRow";
 
 export const VIEW_TYPE_TASK_MANAGER = "md-task-manager-view";
@@ -27,6 +35,18 @@ const GROUP_OPTIONS: GroupBy[] = ["none", "date", "priority", "status", "project
 const SORT_OPTIONS: SortBy[] = ["smart", "due", "priority", "title", "file"];
 /** Below this width the side panes no longer fit next to the list and become overlays. */
 const COMPACT_WIDTH = 700;
+const RIBBON_WIDTH = 44;
+/** The list keeps at least this much room when a side pane is dragged wider. */
+const MIN_MAIN_WIDTH = 300;
+const PANE_LIMITS = { sidebar: [160, 480], details: [240, 720] } as const;
+const NAV_ICONS: Record<string, string> = {
+	home: "home",
+	inbox: "inbox",
+	today: "calendar",
+	upcoming: "calendar-range",
+	all: "list",
+};
+const DATE_FILTERS: QuickFilters["date"][] = ["any", "overdue", "today", "week", "nodate"];
 
 /**
  * Three-pane task manager:
@@ -35,8 +55,9 @@ const COMPACT_WIDTH = 700;
  *   right  – details of the selected task (or bulk actions for a multi-selection)
  */
 export class TaskManagerView extends ItemView {
-	nav: NavTarget = { kind: "today" };
+	nav: NavTarget;
 	filter = "";
+	quick: QuickFilters = emptyQuickFilters();
 	selected = new Set<string>();
 	focusId: string | null = null;
 	private anchorId: string | null = null;
@@ -46,9 +67,16 @@ export class TaskManagerView extends ItemView {
 	private compact = false;
 	private overlay: "sidebar" | "details" | null = null;
 
+	private viewEl!: HTMLElement;
 	private rootEl!: HTMLElement;
 	private sidebarEl!: HTMLElement;
+	private titleIconEl!: HTMLElement;
 	private titleEl!: HTMLElement;
+	private homeBtn!: HTMLElement;
+	private filterBtn!: HTMLElement;
+	private filterChipsEl!: HTMLElement;
+	private notesEl!: HTMLElement;
+	private zoomLabel!: HTMLElement;
 	private countEl!: HTMLElement;
 	private listEl!: HTMLElement;
 	private detailsEl!: HTMLElement;
@@ -60,6 +88,7 @@ export class TaskManagerView extends ItemView {
 		readonly plugin: TaskManagerPlugin,
 	) {
 		super(leaf);
+		this.nav = { kind: plugin.settings.startScreen };
 	}
 
 	getViewType(): string {
@@ -93,8 +122,20 @@ export class TaskManagerView extends ItemView {
 		const container = this.containerEl.children[1] as HTMLElement;
 		container.empty();
 		container.addClass("mtm-view");
+		this.viewEl = container;
 		this.rootEl = container.createDiv({ cls: "mtm-root" });
 		this.buildLayout();
+		this.applyScale();
+		// Ctrl/Cmd + wheel zooms the task manager only.
+		this.rootEl.addEventListener(
+			"wheel",
+			(e) => {
+				if (!(e.ctrlKey || e.metaKey) || e.deltaY === 0) return;
+				e.preventDefault();
+				void this.plugin.setScale(this.plugin.settings.uiScale + (e.deltaY < 0 ? SCALE_STEP : -SCALE_STEP));
+			},
+			{ passive: false },
+		);
 		this.registerEvent(this.plugin.index.on("changed", () => this.refresh()));
 		this.renderAll();
 		window.requestAnimationFrame(() => this.updateCompact());
@@ -111,11 +152,12 @@ export class TaskManagerView extends ItemView {
 	private buildLayout(): void {
 		this.buildRibbon();
 		this.sidebarEl = this.rootEl.createDiv({ cls: "mtm-sidebar" });
+		this.makeResizer("sidebar");
 		const main = this.rootEl.createDiv({ cls: "mtm-main" });
 		const calendarEl = this.rootEl.createDiv({ cls: "mtm-calendar" });
 		this.calendar = new CalendarPane(this, calendarEl);
+		this.makeResizer("details");
 		this.detailsEl = this.rootEl.createDiv({ cls: "mtm-details" });
-		this.applyLayoutClasses();
 		// In compact mode, clicking the list/calendar closes an open overlay (the toggle buttons handle themselves).
 		for (const el of [main, calendarEl]) {
 			el.addEventListener("mousedown", (e) => {
@@ -128,11 +170,20 @@ export class TaskManagerView extends ItemView {
 		// header
 		const header = main.createDiv({ cls: "mtm-header" });
 		this.iconButton(header, "panel-left", t("toggleSidebar"), () => this.togglePane("sidebar"));
+		this.titleIconEl = header.createSpan({ cls: "mtm-header-icon" });
 		this.titleEl = header.createDiv({ cls: "mtm-header-title" });
 		this.countEl = header.createDiv({ cls: "mtm-header-count" });
 		header.createDiv({ cls: "mtm-spacer" });
+		this.homeBtn = this.iconButton(header, "sliders-horizontal", t("homeSettings"), () => this.openHomeSettings());
 		this.iconButton(header, "arrow-up-down", `${t("groupBy")} / ${t("sortBy")}`, (evt) => this.showViewMenu(evt));
-		this.filterInput = header.createEl("input", {
+		this.filterBtn = this.iconButton(header, "filter", t("toggleFilters"), () => void this.toggleFilters());
+		this.iconButton(header, "panel-right", t("toggleDetails"), () => this.togglePane("details"));
+
+		// filter bar (shown/hidden with the filter button)
+		const filterBar = main.createDiv({ cls: "mtm-filterbar" });
+		const search = filterBar.createDiv({ cls: "mtm-filter-search" });
+		setIcon(search.createSpan({ cls: "mtm-filter-search-icon" }), "search");
+		this.filterInput = search.createEl("input", {
 			type: "search",
 			cls: "mtm-filter",
 			attr: { placeholder: t("filterPlaceholder") },
@@ -141,7 +192,10 @@ export class TaskManagerView extends ItemView {
 			this.filter = this.filterInput.value;
 			this.renderList();
 		});
-		this.iconButton(header, "panel-right", t("toggleDetails"), () => this.togglePane("details"));
+		this.filterChipsEl = filterBar.createDiv({ cls: "mtm-filter-chips" });
+
+		// notes of the current project
+		this.notesEl = main.createDiv({ cls: "mtm-project-notes" });
 
 		// list
 		this.listEl = main.createDiv({ cls: "mtm-list", attr: { tabindex: "0" } });
@@ -169,6 +223,8 @@ export class TaskManagerView extends ItemView {
 				input.blur();
 			}
 		});
+
+		this.applyLayoutClasses();
 	}
 
 	/** Narrow strip on the far left that switches between the task list and the calendar. */
@@ -184,6 +240,15 @@ export class TaskManagerView extends ItemView {
 			b.addEventListener("click", () => void this.setMode(mode));
 		}
 		ribbon.createDiv({ cls: "mtm-spacer" });
+		const zoom = ribbon.createDiv({ cls: "mtm-ribbon-zoom" });
+		const zoomIn = zoom.createDiv({ cls: "clickable-icon mtm-ribbon-btn", attr: { "aria-label": t("zoomIn") } });
+		setIcon(zoomIn, "zoom-in");
+		zoomIn.addEventListener("click", () => void this.plugin.setScale(this.plugin.settings.uiScale + SCALE_STEP));
+		this.zoomLabel = zoom.createDiv({ cls: "mtm-ribbon-zoom-label", attr: { "aria-label": t("zoomReset") } });
+		this.zoomLabel.addEventListener("click", () => void this.plugin.setScale(1));
+		const zoomOut = zoom.createDiv({ cls: "clickable-icon mtm-ribbon-btn", attr: { "aria-label": t("zoomOut") } });
+		setIcon(zoomOut, "zoom-out");
+		zoomOut.addEventListener("click", () => void this.plugin.setScale(this.plugin.settings.uiScale - SCALE_STEP));
 		const gear = ribbon.createDiv({ cls: "clickable-icon mtm-ribbon-btn", attr: { "aria-label": t("settings") } });
 		setIcon(gear, "settings");
 		gear.addEventListener("click", () => this.plugin.openSettings());
@@ -221,8 +286,84 @@ export class TaskManagerView extends ItemView {
 		await this.plugin.saveSettings();
 	}
 
+	/** Applies the interface scale (font and icon sizes are derived from --mtm-scale in CSS). */
+	applyScale(): void {
+		const scale = this.plugin.settings.uiScale;
+		this.viewEl.style.setProperty("--mtm-scale", String(scale));
+		this.zoomLabel.setText(`${Math.round(scale * 100)}%`);
+	}
+
+	async toggleFilters(): Promise<void> {
+		this.plugin.settings.showFilters = !this.plugin.settings.showFilters;
+		this.applyLayoutClasses();
+		await this.plugin.saveData(this.plugin.settings);
+		if (this.plugin.settings.showFilters) this.filterInput.focus();
+	}
+
+	openHomeSettings(): void {
+		new HomeSettingsModal(this.app, this.plugin).open();
+	}
+
+	// ---- resizable side panes ----------------------------------------------
+
+	private makeResizer(which: "sidebar" | "details"): void {
+		const handle = this.rootEl.createDiv({ cls: `mtm-resizer mtm-resizer-${which}` });
+		const pane = () => (which === "sidebar" ? this.sidebarEl : this.detailsEl);
+		handle.addEventListener("pointerdown", (e) => {
+			if (e.button !== 0) return;
+			e.preventDefault();
+			const s = this.plugin.settings;
+			const startX = e.clientX;
+			const startW = pane().getBoundingClientRect().width;
+			handle.setPointerCapture(e.pointerId);
+			this.rootEl.addClass("is-resizing");
+			const move = (ev: PointerEvent) => {
+				const dx = ev.clientX - startX;
+				const w = this.clampWidth(which, which === "sidebar" ? startW + dx : startW - dx);
+				if (which === "sidebar") s.sidebarWidth = w;
+				else s.detailsWidth = w;
+				this.applyWidths();
+			};
+			const up = () => {
+				handle.removeEventListener("pointermove", move);
+				handle.removeEventListener("pointerup", up);
+				handle.removeEventListener("pointercancel", up);
+				this.rootEl.removeClass("is-resizing");
+				void this.plugin.saveData(s);
+			};
+			handle.addEventListener("pointermove", move);
+			handle.addEventListener("pointerup", up);
+			handle.addEventListener("pointercancel", up);
+		});
+		// Double-click puts the pane back to its default width.
+		handle.addEventListener("dblclick", () => {
+			const s = this.plugin.settings;
+			if (which === "sidebar") s.sidebarWidth = DEFAULT_SETTINGS.sidebarWidth;
+			else s.detailsWidth = DEFAULT_SETTINGS.detailsWidth;
+			this.applyWidths();
+			void this.plugin.saveData(s);
+		});
+	}
+
+	private clampWidth(which: "sidebar" | "details", width: number): number {
+		const s = this.plugin.settings;
+		const [min, max] = PANE_LIMITS[which];
+		const other = which === "sidebar" ? (s.showDetails ? this.detailsEl.clientWidth : 0) : s.showSidebar ? this.sidebarEl.clientWidth : 0;
+		const room = this.rootEl.clientWidth - RIBBON_WIDTH - other - MIN_MAIN_WIDTH;
+		return Math.round(Math.max(min, Math.min(max, room, width)));
+	}
+
+	private applyWidths(): void {
+		const s = this.plugin.settings;
+		this.rootEl.style.setProperty("--mtm-sidebar-w", `${s.sidebarWidth}px`);
+		this.rootEl.style.setProperty("--mtm-details-w", `${s.detailsWidth}px`);
+	}
+
 	private applyLayoutClasses(): void {
 		const s = this.plugin.settings;
+		this.applyWidths();
+		this.rootEl.toggleClass("mtm-show-filters", s.showFilters);
+		this.filterBtn.toggleClass("is-active", s.showFilters);
 		this.rootEl.toggleClass("mtm-hide-sidebar", !s.showSidebar);
 		this.rootEl.toggleClass("mtm-hide-details", !s.showDetails);
 		this.rootEl.toggleClass("mtm-compact", this.compact);
@@ -282,6 +423,7 @@ export class TaskManagerView extends ItemView {
 		this.clearSelection(false);
 		this.filter = "";
 		this.filterInput.value = "";
+		this.quick = emptyQuickFilters();
 		this.renderAll();
 		this.app.workspace.requestSaveLayout();
 	}
@@ -345,7 +487,7 @@ export class TaskManagerView extends ItemView {
 	renderList(): void {
 		const { index, settings } = this.plugin;
 		const prefs = this.prefs();
-		this.titleEl.setText(this.navLabel());
+		this.renderHeader();
 
 		const scroll = this.listEl.scrollTop;
 		this.listEl.empty();
@@ -360,6 +502,7 @@ export class TaskManagerView extends ItemView {
 
 		let tasks = tasksForNav(this.nav, index, settings, prefs.showCompleted);
 		tasks = applyFilter(tasks, this.filter);
+		tasks = applyQuickFilters(tasks, this.quick);
 		tasks = hideNestedSubtasks(tasks);
 		tasks = sortTasks(tasks, prefs.sortBy);
 		this.countEl.setText(String(tasks.length));
@@ -400,6 +543,122 @@ export class TaskManagerView extends ItemView {
 		}
 		this.listEl.scrollTop = scroll;
 		this.renderDetails();
+	}
+
+	/** Title with its icon, header buttons, filter chips and the project's notes strip. */
+	private renderHeader(): void {
+		const { settings } = this.plugin;
+		this.titleEl.setText(this.navLabel());
+		this.titleIconEl.empty();
+		const nav = this.nav;
+		if (nav.kind === "project") renderProjectMarker(this.titleIconEl, settings, nav.path);
+		else if (nav.kind === "tag") this.titleIconEl.createSpan({ cls: "mtm-dot" }).style.background = colorFor(nav.tag);
+		else setIcon(this.titleIconEl, NAV_ICONS[nav.kind] ?? "list");
+		this.homeBtn.toggle(nav.kind === "home");
+		this.filterBtn.toggleClass("has-filters", hasQuickFilters(this.quick) || !!this.filter.trim());
+		this.renderFilterChips();
+		this.renderProjectNotes();
+	}
+
+	private renderFilterChips(): void {
+		const el = this.filterChipsEl;
+		el.empty();
+		const q = this.quick;
+
+		const prio = el.createDiv({ cls: "mtm-fgroup" });
+		for (const p of PRIORITIES_DESC) {
+			const chip = prio.createDiv({
+				cls: ["mtm-fchip", "mtm-fchip-prio", `mtm-prio-${Priority[p].toLowerCase()}`],
+				attr: { "aria-label": `${t("priority")}: ${priorityLabel(p)}` },
+			});
+			setIcon(chip, "flag");
+			chip.toggleClass("is-active", q.priorities.has(p));
+			chip.addEventListener("click", () => {
+				if (q.priorities.has(p)) q.priorities.delete(p);
+				else q.priorities.add(p);
+				this.renderList();
+			});
+		}
+
+		const seg = el.createDiv({ cls: "mtm-seg" });
+		for (const d of DATE_FILTERS) {
+			const b = seg.createDiv({ cls: "mtm-seg-btn", text: t(`f_${d}`) });
+			b.toggleClass("is-active", q.date === d);
+			b.addEventListener("click", () => {
+				q.date = d;
+				this.renderList();
+			});
+		}
+
+		const tags = this.allTags();
+		if (tags.length || q.tag) {
+			const sel = el.createEl("select", { cls: "dropdown mtm-ftag" });
+			sel.createEl("option", { value: "", text: t("anyTag") });
+			for (const tag of tags) sel.createEl("option", { value: tag, text: `#${tag}` });
+			sel.value = q.tag;
+			sel.toggleClass("is-active", !!q.tag);
+			sel.addEventListener("change", () => {
+				q.tag = sel.value;
+				this.renderList();
+			});
+		}
+
+		const prefs = this.prefs();
+		const done = el.createDiv({ cls: "mtm-fchip mtm-fchip-text" });
+		setIcon(done.createSpan(), "check-check");
+		done.createSpan({ text: t("showCompleted") });
+		done.toggleClass("is-active", prefs.showCompleted);
+		done.addEventListener("click", () => void this.setPrefs({ showCompleted: !prefs.showCompleted }));
+
+		if (hasQuickFilters(q) || this.filter) {
+			const reset = el.createDiv({ cls: "mtm-fchip mtm-fchip-text mtm-fchip-reset" });
+			setIcon(reset.createSpan(), "x");
+			reset.createSpan({ text: t("resetFilters") });
+			reset.addEventListener("click", () => {
+				this.quick = emptyQuickFilters();
+				this.filter = "";
+				this.filterInput.value = "";
+				this.renderList();
+			});
+		}
+	}
+
+	/** In a project: its own note and the attached notes, with a button to attach more. */
+	private renderProjectNotes(): void {
+		const el = this.notesEl;
+		el.empty();
+		const nav = this.nav;
+		el.toggle(nav.kind === "project");
+		if (nav.kind !== "project") return;
+		const project = nav.path;
+
+		el.createSpan({ cls: "mtm-notes-label", text: t("attachedNotes") });
+		const chip = (path: string, attached: boolean) => {
+			const c = el.createDiv({ cls: "mtm-note-chip", attr: { "aria-label": path } });
+			setIcon(c.createSpan({ cls: "mtm-note-chip-icon" }), attached ? "file-text" : "folder");
+			c.createSpan({ cls: "mtm-note-chip-name", text: basename(path) });
+			c.addEventListener("click", () => void this.app.workspace.openLinkText(path, "", "tab"));
+			if (attached) {
+				const x = c.createSpan({ cls: "mtm-note-chip-remove", attr: { "aria-label": t("detachNote") } });
+				setIcon(x, "x");
+				x.addEventListener("click", (e) => {
+					e.stopPropagation();
+					void this.plugin.detachNote(project, path);
+				});
+			}
+		};
+		chip(project, false);
+		for (const note of this.plugin.index.notesOf(project)) chip(note, true);
+
+		const add = el.createDiv({ cls: "mtm-note-chip mtm-note-add" });
+		setIcon(add.createSpan({ cls: "mtm-note-chip-icon" }), "paperclip");
+		add.createSpan({ text: t("attachNote") });
+		add.addEventListener("click", () => pickAttachedNote(this, project));
+
+		el.createDiv({ cls: "mtm-spacer" });
+		const style = el.createDiv({ cls: "clickable-icon mtm-notes-style", attr: { "aria-label": t("projectStyle") } });
+		setIcon(style, "palette");
+		style.addEventListener("click", () => editProjectStyle(this, project));
 	}
 
 	renderDetails(): void {
@@ -538,6 +797,17 @@ export class TaskManagerView extends ItemView {
 			case "today":
 				spec.due ??= today();
 				break;
+			case "home": {
+				// Make the new task land on Home as configured.
+				const home = settings.home;
+				if (home.dateScope === "today" || home.dateScope === "week" || home.dateScope === "dated") spec.due ??= today();
+				if (home.projects.length && !home.includeInbox) path = home.projects[0];
+				if (home.tags.length && !spec.tags?.some((x) => home.tags.some((h) => h.toLowerCase() === x.toLowerCase()))) {
+					spec.tags = [...(spec.tags ?? []), home.tags[0]];
+				}
+				if ((spec.priority ?? Priority.Normal) < home.minPriority) spec.priority = home.minPriority;
+				break;
+			}
 		}
 		await writer.createTask(path, spec);
 	}

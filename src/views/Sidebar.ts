@@ -3,9 +3,9 @@ import { t } from "../i18n";
 import { addDays, today } from "../parser/dates";
 import { countOpen, isOpen } from "../services/query";
 import { basename } from "../services/TaskIndex";
-import { NavTarget, navKey } from "../types";
-import { ProjectNoteSuggestModal } from "./modals";
-import { colorFor } from "./render";
+import { NavTarget, navKey, SmartList } from "../types";
+import { FileSuggestModal, ProjectNoteSuggestModal, ProjectStyleModal } from "./modals";
+import { colorFor, renderProjectMarker } from "./render";
 import { DND_TAG, TaskManagerView } from "./TaskManagerView";
 
 interface TagNode {
@@ -55,13 +55,14 @@ export function renderSidebar(view: TaskManagerView, el: HTMLElement): void {
 		parent: HTMLElement,
 		target: NavTarget,
 		label: string,
-		opts: { icon?: string; color?: string; count?: number; depth?: number } = {},
+		opts: { icon?: string; color?: string; project?: string; count?: number; depth?: number } = {},
 	): HTMLElement => {
 		const row = parent.createDiv({ cls: "mtm-nav-item" });
 		row.toggleClass("is-active", navKey(target) === current);
 		if (opts.depth) row.style.paddingLeft = `${8 + opts.depth * 14}px`;
 		const icon = row.createSpan({ cls: "mtm-nav-icon" });
-		if (opts.color) icon.createSpan({ cls: "mtm-dot" }).style.background = opts.color;
+		if (opts.project) renderProjectMarker(icon, settings, opts.project);
+		else if (opts.color) icon.createSpan({ cls: "mtm-dot" }).style.background = opts.color;
 		else if (opts.icon) setIcon(icon, opts.icon);
 		row.createSpan({ cls: "mtm-nav-label", text: label });
 		if (opts.count) row.createSpan({ cls: "mtm-nav-count", text: String(opts.count) });
@@ -131,16 +132,24 @@ export function renderSidebar(view: TaskManagerView, el: HTMLElement): void {
 
 	// ---- smart lists ----
 	const smart = nav.createDiv({ cls: "mtm-nav-group" });
-	const inbox = item(smart, { kind: "inbox" }, t("inbox"), { icon: "inbox", count: countOpen({ kind: "inbox" }, index, settings) });
-	view.makeDropTarget(inbox, (tasks) => writer.move(tasks, settings.inboxPath));
-	const todayEl = item(smart, { kind: "today" }, t("today"), { icon: "calendar", count: countOpen({ kind: "today" }, index, settings) });
-	view.makeDropTarget(todayEl, (tasks) => writer.setDate(tasks, "due", today()));
-	const upcoming = item(smart, { kind: "upcoming" }, t("upcoming"), {
-		icon: "calendar-range",
-		count: countOpen({ kind: "upcoming" }, index, settings),
-	});
-	view.makeDropTarget(upcoming, (tasks) => writer.setDate(tasks, "due", addDays(today(), 1)));
-	item(smart, { kind: "all" }, t("all"), { icon: "list", count: countOpen({ kind: "all" }, index, settings) });
+	const shown = (l: SmartList) => !settings.hiddenSmartLists.includes(l);
+	const smartItem = (kind: SmartList, icon: string) =>
+		item(smart, { kind }, t(kind), { icon, count: countOpen({ kind }, index, settings) });
+	if (shown("home")) {
+		const home = smartItem("home", "home");
+		const gear = home.createSpan({ cls: "clickable-icon mtm-nav-item-action", attr: { "aria-label": t("homeSettings") } });
+		setIcon(gear, "sliders-horizontal");
+		gear.addEventListener("click", (e) => {
+			e.stopPropagation();
+			view.openHomeSettings();
+		});
+	}
+	if (shown("inbox")) view.makeDropTarget(smartItem("inbox", "inbox"), (tasks) => writer.move(tasks, settings.inboxPath));
+	if (shown("today")) view.makeDropTarget(smartItem("today", "calendar"), (tasks) => writer.setDate(tasks, "due", today()));
+	if (shown("upcoming")) {
+		view.makeDropTarget(smartItem("upcoming", "calendar-range"), (tasks) => writer.setDate(tasks, "due", addDays(today(), 1)));
+	}
+	if (shown("all")) smartItem("all", "list");
 
 	// ---- pinned tags ----
 	if (settings.pinnedTags.length) {
@@ -161,7 +170,7 @@ export function renderSidebar(view: TaskManagerView, el: HTMLElement): void {
 			if (!projects.length) body.createDiv({ cls: "mtm-nav-hint", text: t("noProjectsHint") });
 			for (const path of projects) {
 				const row = item(body, { kind: "project", path }, basename(path), {
-					color: colorFor(path),
+					project: path,
 					count: countOpen({ kind: "project", path }, index, settings),
 				});
 				row.addClass("mtm-project-item");
@@ -176,6 +185,8 @@ export function renderSidebar(view: TaskManagerView, el: HTMLElement): void {
 								.setIcon("file-text")
 								.onClick(() => void view.app.workspace.openLinkText(path, "", "tab")),
 						)
+						.addItem((i) => i.setTitle(t("projectStyle")).setIcon("palette").onClick(() => editProjectStyle(view, path)))
+						.addItem((i) => i.setTitle(t("attachNote")).setIcon("paperclip").onClick(() => pickAttachedNote(view, path)))
 						.addSeparator()
 						.addItem((i) =>
 							i
@@ -252,6 +263,27 @@ function pickProjectNote(view: TaskManagerView): void {
 		await plugin.addProject(path);
 		view.setNav({ kind: "project", path });
 	}).open();
+}
+
+export function editProjectStyle(view: TaskManagerView, path: string): void {
+	const { plugin } = view;
+	new ProjectStyleModal(view.app, path, plugin.settings.projectStyles[path], async (style) => {
+		if (style.icon || style.color) plugin.settings.projectStyles[path] = style;
+		else delete plugin.settings.projectStyles[path];
+		await plugin.saveSettings();
+	}).open();
+}
+
+/** Attach another note to a project, so its tasks are listed there too. */
+export function pickAttachedNote(view: TaskManagerView, project: string): void {
+	const { plugin, app } = view;
+	const taken = new Set([project, ...plugin.index.notesOf(project)]);
+	const notes = app.vault
+		.getMarkdownFiles()
+		.filter((f) => !taken.has(f.path))
+		.sort((a, b) => b.stat.mtime - a.stat.mtime)
+		.map((f) => f.path);
+	new FileSuggestModal(app, notes, (path) => void plugin.attachNote(project, path), t("attachNotePlaceholder")).open();
 }
 
 function sortedChildren(node: TagNode): TagNode[] {

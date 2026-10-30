@@ -88,6 +88,36 @@ export interface NavPrefs {
 	showCompleted: boolean;
 }
 
+/** Which tasks the "Home" list shows. */
+export type HomeDateScope = "any" | "today" | "week" | "dated" | "undated";
+
+export interface HomeQuery {
+	dateScope: HomeDateScope;
+	/** Project note paths; empty = tasks from anywhere. */
+	projects: string[];
+	/** Tags (without #); empty = any tag or none. */
+	tags: string[];
+	/** Only tasks with at least this priority. */
+	minPriority: Priority;
+	/** Also include inbox tasks when projects are restricted. */
+	includeInbox: boolean;
+}
+
+/** Per-project appearance chosen by the user. */
+export interface ProjectStyle {
+	/** Lucide icon id. */
+	icon?: string;
+	/** Any CSS color. */
+	color?: string;
+}
+
+export const SCALE_MIN = 0.7;
+export const SCALE_MAX = 1.6;
+export const SCALE_STEP = 0.1;
+
+export type SmartList = "home" | "inbox" | "today" | "upcoming" | "all";
+export const SMART_LISTS: SmartList[] = ["home", "inbox", "today", "upcoming", "all"];
+
 export interface TaskManagerSettings {
 	language: "auto" | "en" | "ru";
 	inboxPath: string;
@@ -113,6 +143,23 @@ export interface TaskManagerSettings {
 	navPrefs: Record<string, NavPrefs>;
 	showSidebar: boolean;
 	showDetails: boolean;
+	/** Filter bar under the header. */
+	showFilters: boolean;
+	/** Pane widths in px, changed by dragging the dividers. */
+	sidebarWidth: number;
+	detailsWidth: number;
+	/** Interface scale of the task manager, 1 = 100 %. */
+	uiScale: number;
+	/** List opened in a new task manager tab. */
+	startScreen: SmartList;
+	/** Smart lists hidden from the sidebar. */
+	hiddenSmartLists: SmartList[];
+	home: HomeQuery;
+	/** Extra notes attached to a project (project path → note paths); their tasks show in the project. */
+	projectNotes: Record<string, string[]>;
+	projectStyles: Record<string, ProjectStyle>;
+	/** Open the task manager when Obsidian starts. */
+	openOnStartup: boolean;
 	viewMode: ViewMode;
 	calendarView: CalendarMode;
 	/** 0 = Sunday, 1 = Monday. */
@@ -127,6 +174,7 @@ export type CalendarMode = "month" | "week" | "day";
 
 /** What the center pane is currently showing. */
 export type NavTarget =
+	| { kind: "home" }
 	| { kind: "inbox" }
 	| { kind: "today" }
 	| { kind: "upcoming" }

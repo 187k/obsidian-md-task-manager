@@ -1,11 +1,12 @@
-import { Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
+import { Editor, Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
 import { setLanguage, t } from "./i18n";
 import { parseQuickAdd } from "./parser/quickAdd";
 import { buildParserConfig } from "./parser/TaskParser";
 import { TaskIndex } from "./services/TaskIndex";
 import { TaskWriter } from "./services/TaskWriter";
 import { DEFAULT_SETTINGS, DEFAULT_STATUSES, TaskManagerSettingTab } from "./settings";
-import { TaskManagerSettings } from "./types";
+import { NavTarget, SCALE_MAX, SCALE_MIN, SCALE_STEP, TaskManagerSettings } from "./types";
+import { registerEmbed } from "./views/Embed";
 import { QuickAddModal } from "./views/modals";
 import { TaskManagerView, VIEW_TYPE_TASK_MANAGER } from "./views/TaskManagerView";
 
@@ -41,10 +42,32 @@ export default class TaskManagerPlugin extends Plugin {
 				}).open(),
 		});
 		this.addCommand({
+			id: "zoom-in",
+			name: t("zoomIn"),
+			callback: () => void this.setScale(this.settings.uiScale + SCALE_STEP),
+		});
+		this.addCommand({
+			id: "zoom-out",
+			name: t("zoomOut"),
+			callback: () => void this.setScale(this.settings.uiScale - SCALE_STEP),
+		});
+		this.addCommand({
+			id: "zoom-reset",
+			name: t("zoomReset"),
+			callback: () => void this.setScale(1),
+		});
+		this.addCommand({
+			id: "insert-embed",
+			name: t("insertEmbed"),
+			editorCallback: (editor: Editor) => editor.replaceSelection("```task-manager\nview: home\nlimit: 15\n```\n"),
+		});
+		this.addCommand({
 			id: "rebuild-index",
 			name: t("rebuildIndex"),
 			callback: () => void this.rebuildIndex(true),
 		});
+
+		registerEmbed(this);
 
 		// Keep the manual project lists pointing at the right notes when they are renamed or deleted.
 		this.registerEvent(this.app.vault.on("rename", (f, oldPath) => void this.onNotePathChanged(oldPath, f.path)));
@@ -54,6 +77,7 @@ export default class TaskManagerPlugin extends Plugin {
 		this.app.workspace.onLayoutReady(async () => {
 			this.index.attach((ref) => this.registerEvent(ref));
 			await this.index.rebuild();
+			if (this.settings.openOnStartup) await this.activateView();
 		});
 	}
 
@@ -76,6 +100,15 @@ export default class TaskManagerPlugin extends Plugin {
 			manualProjects: [...(data.manualProjects ?? [])],
 			hiddenProjects: [...(data.hiddenProjects ?? [])],
 			navPrefs: { ...(data.navPrefs ?? {}) },
+			hiddenSmartLists: [...(data.hiddenSmartLists ?? [])],
+			home: {
+				...DEFAULT_SETTINGS.home,
+				...(data.home ?? {}),
+				projects: [...(data.home?.projects ?? [])],
+				tags: [...(data.home?.tags ?? [])],
+			},
+			projectNotes: Object.fromEntries(Object.entries(data.projectNotes ?? {}).map(([k, v]) => [k, [...v]])),
+			projectStyles: Object.fromEntries(Object.entries(data.projectStyles ?? {}).map(([k, v]) => [k, { ...v }])),
 		};
 	}
 
@@ -134,16 +167,52 @@ export default class TaskManagerPlugin extends Plugin {
 		this.refreshViews();
 	}
 
+	/** Attaches a note to a project: its tasks are listed in the project. */
+	async attachNote(project: string, note: string): Promise<void> {
+		const list = (this.settings.projectNotes[project] ??= []);
+		if (note === project || list.includes(note)) return;
+		list.push(note);
+		await this.saveData(this.settings);
+		this.refreshViews();
+	}
+
+	async detachNote(project: string, note: string): Promise<void> {
+		const list = (this.settings.projectNotes[project] ?? []).filter((p) => p !== note);
+		if (list.length) this.settings.projectNotes[project] = list;
+		else delete this.settings.projectNotes[project];
+		await this.saveData(this.settings);
+		this.refreshViews();
+	}
+
+	/** Changes the interface scale of every open task manager. */
+	async setScale(scale: number): Promise<void> {
+		this.settings.uiScale = Math.round(Math.min(SCALE_MAX, Math.max(SCALE_MIN, scale)) * 100) / 100;
+		await this.saveData(this.settings);
+		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_TASK_MANAGER)) {
+			if (leaf.view instanceof TaskManagerView) leaf.view.applyScale();
+		}
+	}
+
 	private async onNotePathChanged(oldPath: string, newPath: string | null): Promise<void> {
+		const s = this.settings;
 		let changed = false;
-		for (const list of [this.settings.manualProjects, this.settings.hiddenProjects]) {
+		const lists = [s.manualProjects, s.hiddenProjects, s.home.projects, ...Object.values(s.projectNotes)];
+		for (const list of lists) {
 			const i = list.indexOf(oldPath);
 			if (i < 0) continue;
 			if (newPath) list[i] = newPath;
 			else list.splice(i, 1);
 			changed = true;
 		}
-		if (changed) await this.saveData(this.settings);
+		// Settings keyed by project path follow the note too.
+		for (const map of [s.projectNotes, s.projectStyles] as Record<string, unknown>[]) {
+			if (!(oldPath in map)) continue;
+			if (newPath) map[newPath] = map[oldPath];
+			delete map[oldPath];
+			changed = true;
+		}
+		for (const [k, v] of Object.entries(s.projectNotes)) if (!v.length) delete s.projectNotes[k];
+		if (changed) await this.saveData(s);
 	}
 
 	async rebuildIndex(notify: boolean): Promise<void> {
@@ -157,14 +226,16 @@ export default class TaskManagerPlugin extends Plugin {
 		}
 	}
 
-	async activateView(): Promise<void> {
+	/** Opens (or focuses) the task manager, optionally on a given list. */
+	async activateView(nav?: NavTarget): Promise<void> {
 		const { workspace } = this.app;
 		let leaf: WorkspaceLeaf | null = workspace.getLeavesOfType(VIEW_TYPE_TASK_MANAGER)[0] ?? null;
 		if (!leaf) {
 			leaf = workspace.getLeaf("tab");
-			await leaf.setViewState({ type: VIEW_TYPE_TASK_MANAGER, active: true });
+			await leaf.setViewState({ type: VIEW_TYPE_TASK_MANAGER, active: true, state: nav ? { nav } : {} });
 		}
 		await workspace.revealLeaf(leaf);
+		if (nav && leaf.view instanceof TaskManagerView) leaf.view.setNav(nav);
 	}
 
 	openSettings(): void {

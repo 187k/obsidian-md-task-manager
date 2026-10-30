@@ -1,6 +1,7 @@
 import { App, PluginSettingTab, Setting, setIcon } from "obsidian";
 import { t } from "./i18n";
 import type TaskManagerPlugin from "./main";
+import { renderHomeSettings } from "./views/modals";
 import { Priority, PRIORITIES_DESC, StatusDef, StatusType, TaskManagerSettings } from "./types";
 
 export const DEFAULT_STATUSES: StatusDef[] = [
@@ -41,6 +42,16 @@ export const DEFAULT_SETTINGS: TaskManagerSettings = {
 	navPrefs: {},
 	showSidebar: true,
 	showDetails: true,
+	showFilters: false,
+	sidebarWidth: 240,
+	detailsWidth: 320,
+	uiScale: 1,
+	startScreen: "home",
+	hiddenSmartLists: [],
+	home: { dateScope: "week", projects: [], tags: [], minPriority: Priority.Lowest, includeInbox: true },
+	projectNotes: {},
+	projectStyles: {},
+	openOnStartup: false,
 	viewMode: "list",
 	calendarView: "month",
 	weekStart: 1,
@@ -143,6 +154,45 @@ export class TaskManagerSettingTab extends PluginSettingTab {
 			);
 
 		this.listSetting(t("s_pinned"), t("s_pinnedDesc"), "work/dev, personal", s.pinnedTags, (v) => (s.pinnedTags = v.map((x) => x.replace(/^#/, ""))), false);
+
+		// ---- Interface ----
+		new Setting(containerEl).setName(t("s_interface")).setHeading();
+
+		new Setting(containerEl)
+			.setName(t("s_scale"))
+			.setDesc(t("s_scaleDesc"))
+			.addSlider((x) =>
+				x
+					.setLimits(70, 160, 10)
+					.setValue(Math.round(s.uiScale * 100))
+					.setDynamicTooltip()
+					.onChange(async (v) => {
+						await this.plugin.setScale(v / 100);
+					}),
+			)
+			.addExtraButton((b) =>
+				b
+					.setIcon("rotate-ccw")
+					.setTooltip(t("zoomReset"))
+					.onClick(async () => {
+						await this.plugin.setScale(1);
+						this.display();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName(t("s_openOnStartup"))
+			.setDesc(t("s_openOnStartupDesc"))
+			.addToggle((x) =>
+				x.setValue(s.openOnStartup).onChange(async (v) => {
+					s.openOnStartup = v;
+					await this.plugin.saveSettings();
+				}),
+			);
+
+		// ---- Home screen ----
+		new Setting(containerEl).setName(t("s_home")).setHeading();
+		renderHomeSettings(containerEl, this.plugin);
 
 		// ---- Metadata ----
 		new Setting(containerEl).setName(t("s_metadata")).setHeading();

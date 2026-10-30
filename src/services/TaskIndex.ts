@@ -179,6 +179,20 @@ export class TaskIndex extends Events {
 		return this.projectFiles.has(path);
 	}
 
+	/** Notes attached to a project by hand (their tasks are listed in the project). */
+	notesOf(project: string): string[] {
+		return this.getSettings().projectNotes[project] ?? [];
+	}
+
+	/** The project a note belongs to: the note itself if it is a project, otherwise the project it is attached to. */
+	projectOf(path: string): string | undefined {
+		if (this.projectFiles.has(path)) return path;
+		for (const [project, notes] of Object.entries(this.getSettings().projectNotes)) {
+			if (this.projectFiles.has(project) && notes.includes(path)) return project;
+		}
+		return undefined;
+	}
+
 	/** Walks up the parent chain; useful to decide whether a subtask is shown on its own. */
 	parentOf(task: Task): Task | undefined {
 		return task.parentId ? this.byId.get(task.parentId) : undefined;

@@ -1,5 +1,5 @@
 import { setIcon } from "obsidian";
-import { Priority, Task } from "../types";
+import { Priority, Task, TaskManagerSettings } from "../types";
 
 /**
  * Status checkbox. Shape follows the status type (square for to-do/done, round for in progress,
@@ -36,4 +36,18 @@ function hash(s: string): number {
 /** Stable color per tag / project name so the same tag always looks the same. */
 export function colorFor(name: string): string {
 	return `hsl(${hash(name.toLowerCase()) % 360}, 65%, 55%)`;
+}
+
+export function projectColor(settings: TaskManagerSettings, path: string): string {
+	return settings.projectStyles[path]?.color || colorFor(path);
+}
+
+/** Project marker: the chosen icon in the project color, or a colored diamond. */
+export function renderProjectMarker(parent: HTMLElement, settings: TaskManagerSettings, path: string): HTMLElement {
+	const el = parent.createSpan({ cls: "mtm-project-marker" });
+	el.style.setProperty("--mtm-project-color", projectColor(settings, path));
+	const icon = settings.projectStyles[path]?.icon;
+	if (icon) setIcon(el, icon);
+	else el.createSpan({ cls: "mtm-project-dot" });
+	return el;
 }

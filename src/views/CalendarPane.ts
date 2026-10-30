@@ -28,7 +28,7 @@ import { applyFilter } from "../services/query";
 import { CalendarMode, TaskPatch } from "../types";
 import { confirmDelete } from "./menus";
 import { QuickAddModal } from "./modals";
-import { colorFor, plainText, renderCheckbox } from "./render";
+import { colorFor, plainText, projectColor, renderCheckbox } from "./render";
 import type { TaskManagerView } from "./TaskManagerView";
 
 const HOUR_PX = 48;
@@ -381,7 +381,8 @@ export class CalendarPane {
 		chip.toggleClass("is-timed", opts.zone === "timed");
 		chip.toggleClass("is-bar", !!opts.bar);
 		chip.toggleClass("is-overdue", open && item.end < today());
-		const color = task.tags[0] ? colorFor(task.tags[0]) : this.view.plugin.index.isProject(task.path) ? colorFor(task.path) : "";
+		const project = this.view.plugin.index.projectOf(task.path);
+		const color = task.tags[0] ? colorFor(task.tags[0]) : project ? projectColor(this.settings, project) : "";
 		if (color) chip.style.setProperty("--mtm-chip-color", color);
 
 		const bar = opts.bar;

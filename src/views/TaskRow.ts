@@ -4,7 +4,7 @@ import { effectiveDate, isOpen } from "../services/query";
 import { basename } from "../services/TaskIndex";
 import { Task } from "../types";
 import { showCheckboxMenu } from "./menus";
-import { colorFor, plainText, renderCheckbox } from "./render";
+import { colorFor, plainText, renderCheckbox, renderProjectMarker } from "./render";
 import { DND_TAG, DND_TASKS, TaskManagerView } from "./TaskManagerView";
 
 export function isComment(note: string): boolean {
@@ -65,7 +65,9 @@ export function renderTaskRow(view: TaskManagerView, parent: HTMLElement, task: 
 		setIcon(r, "repeat");
 	}
 	const file = meta.createSpan({ cls: "mtm-chip mtm-file", attr: { "aria-label": task.path } });
-	setIcon(file.createSpan(), index.isProject(task.path) ? "folder" : "file-text");
+	const project = index.projectOf(task.path);
+	if (project) renderProjectMarker(file, settings, project);
+	else setIcon(file.createSpan(), "file-text");
 	file.createSpan({ text: basename(task.path) });
 	file.addEventListener("click", (e) => {
 		e.stopPropagation();
